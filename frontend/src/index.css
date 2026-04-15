@@ -1,0 +1,168 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --coach-summary-chart-primary: #7c4daa;
+  --coach-summary-chart-company: #a8f0c6;
+  --coach-summary-chart-accent: #e8b4f8;
+  --home-chart-blue: #60a5fa;
+  --home-chart-red: #ff7a7a;
+  --home-chart-yellow: #fbbf24;
+  --home-chart-purple: #a78bfa;
+  --coach-summary-series-1: #7c4daa;
+  --coach-summary-series-2: #a78bfa;
+  --coach-summary-series-3: #e8b4f8;
+  --coach-summary-series-4: #a8f0c6;
+  --coach-summary-series-5: #f87171;
+  --coach-summary-series-6: #fbbf24;
+  --coach-summary-series-7: #60a5fa;
+  --coach-summary-series-8: #fb923c;
+  --coach-summary-series-9: #34d399;
+  --coach-summary-series-10: #f472b6;
+  --coach-summary-series-11: #818cf8;
+}
+
+/* Theme toggle hack for quick light mode */
+html.light-mode {
+  filter: invert(1) hue-rotate(180deg);
+  background-color: #0f0f0f; /* Inverts to white-ish */
+}
+html.light-mode img {
+  filter: invert(1) hue-rotate(180deg);
+}
+
+/* 
+  Fix Chart Colors for Light Mode: 
+  Apply a counter-filter to restore the charts to their true primary colors (purple, green, red) 
+  so they aren't distorted by the global invert. Then override the SVG text/grids 
+  so they are visible on the bright background. We apply a brightness(0.8) contrast(1.2)
+  to make the pastel colors darker and more visible on the new white background.
+*/
+html.light-mode .recharts-responsive-container {
+  filter: invert(1) hue-rotate(180deg) brightness(0.8) contrast(1.2);
+}
+html.light-mode .home-analytics-charts .recharts-responsive-container {
+  filter: invert(1) hue-rotate(180deg) brightness(0.62) contrast(1.36) saturate(1.2);
+}
+html.light-mode .coach-summary-charts .recharts-responsive-container {
+  filter: invert(1) hue-rotate(180deg) brightness(0.76) contrast(1.28) saturate(1.18);
+}
+html.light-mode .recharts-responsive-container text {
+  fill: #666666 !important;
+}
+html.light-mode .home-analytics-charts .recharts-responsive-container text {
+  fill: #4b5563 !important;
+}
+html.light-mode .recharts-cartesian-grid line {
+  stroke: #e5e5e5 !important;
+}
+html.light-mode .recharts-tooltip-cursor {
+  fill: rgba(0, 0, 0, 0.05) !important;
+}
+html.light-mode {
+  --coach-summary-chart-primary: #7c3aed;
+  --coach-summary-chart-company: #22c55e;
+  --coach-summary-chart-accent: #8b5cf6;
+  --home-chart-blue: #2563eb;
+  --home-chart-red: #dc2626;
+  --home-chart-yellow: #b45309;
+  --home-chart-purple: #6d28d9;
+  --coach-summary-series-1: #7c3aed;
+  --coach-summary-series-2: #2563eb;
+  --coach-summary-series-3: #be185d;
+  --coach-summary-series-4: #16a34a;
+  --coach-summary-series-5: #dc2626;
+  --coach-summary-series-6: #d97706;
+  --coach-summary-series-7: #0284c7;
+  --coach-summary-series-8: #ea580c;
+  --coach-summary-series-9: #0f766e;
+  --coach-summary-series-10: #c026d3;
+  --coach-summary-series-11: #4338ca;
+}
+
+/* Hardcode fixes for Tailwind arbitrary colors in light mode (since invert doesn't perfect them) */
+/* Mathematically computed pre-filter values so they appear correctly AFTER inversion & hue rotation */
+
+/* Purple adjustments (Output: Darker Rich Purple) */
+html.light-mode .text-\[\#7c4daa\] { color: #cb7bee !important; }
+html.light-mode .bg-\[\#7c4daa\] { background-color: #cb7bee !important; }
+html.light-mode .border-\[\#7c4daa\] { border-color: #cb7bee !important; }
+html.light-mode .bg-\[\#7c4daa\]\/15 { background-color: rgba(203, 123, 238, 0.15) !important; }
+html.light-mode .bg-\[\#7c4daa\]\/10 { background-color: rgba(203, 123, 238, 0.10) !important; }
+html.light-mode .bg-\[\#7c4daa\]\/30 { background-color: rgba(203, 123, 238, 0.30) !important; }
+html.light-mode .bg-\[\#7c4daa\]\/\[0\.05\] { background-color: rgba(203, 123, 238, 0.05) !important; }
+html.light-mode .bg-\[\#7c4daa\]\/\[0\.06\] { background-color: rgba(203, 123, 238, 0.06) !important; }
+html.light-mode .text-\[\#7c4daa\]\/70 { color: rgba(203, 123, 238, 0.70) !important; }
+html.light-mode .text-\[\#7c4daa\]\/80 { color: rgba(203, 123, 238, 0.80) !important; }
+html.light-mode .border-\[\#7c4daa\]\/40 { border-color: rgba(203, 123, 238, 0.40) !important; }
+html.light-mode .text-\[\#c4b5fd\] { color: #cb7bee !important; }
+html.light-mode .text-\[\#c4b5fd\]\/60 { color: rgba(203, 123, 238, 0.60) !important; }
+html.light-mode .text-\[\#c4b5fd\]\/80 { color: rgba(203, 123, 238, 0.80) !important; }
+
+/* Green adjustments (Output: Normal vibrance Green) */
+html.light-mode .text-\[\#a8f0c6\] { color: #22c55e !important; }
+html.light-mode .bg-\[\#a8f0c6\] { background-color: #22c55e !important; }
+html.light-mode .bg-\[\#a8f0c6\]\/15 { background-color: rgba(34, 197, 94, 0.15) !important; }
+html.light-mode .bg-\[\#a8f0c6\]\/10 { background-color: rgba(34, 197, 94, 0.10) !important; }
+html.light-mode .text-\[\#a8f0c6\]\/50 { color: rgba(34, 197, 94, 0.50) !important; }
+html.light-mode .bg-\[\#4ade80\] { background-color: #22c55e !important; }
+html.light-mode .text-\[\#4ade80\] { color: #22c55e !important; }
+html.light-mode .bg-\[\#86efac\] { background-color: #22c55e !important; }
+html.light-mode .text-\[\#86efac\] { color: #22c55e !important; }
+
+/* Red adjustments (Output: Normal Red) */
+html.light-mode .text-\[\#ff7a7a\] { color: #ff8b8b !important; }
+html.light-mode .bg-\[\#ff7a7a\] { background-color: #ff8b8b !important; }
+html.light-mode .bg-\[\#ff7a7a\]\/15 { background-color: rgba(255, 139, 139, 0.15) !important; }
+html.light-mode .bg-\[\#ff7a7a\]\/10 { background-color: rgba(255, 139, 139, 0.10) !important; }
+html.light-mode .bg-\[\#f87171\] { background-color: #ff8b8b !important; }
+html.light-mode .text-\[\#f87171\] { color: #ff8b8b !important; }
+
+/* Orange adjustments (Output: Bold Amber) */
+html.light-mode .bg-\[\#fbbf24\] { background-color: #d06e00 !important; }
+html.light-mode .text-\[\#fbbf24\] { color: #d06e00 !important; }
+
+/* Global page scrollbar */
+html, body {
+  scrollbar-width: thin;
+  scrollbar-color: #7c4daa #0f0f0f;
+}
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+  width: 6px;
+}
+html::-webkit-scrollbar-track,
+body::-webkit-scrollbar-track {
+  background: #0f0f0f;
+}
+html::-webkit-scrollbar-thumb,
+body::-webkit-scrollbar-thumb {
+  background: #7c4daa;
+  border-radius: 999px;
+}
+html::-webkit-scrollbar-thumb:hover,
+body::-webkit-scrollbar-thumb:hover {
+  background: #9b5fd4;
+}
+
+/* Custom themed scrollbar for tables */
+.themed-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: #7c4daa #1a1a2e;
+}
+.themed-scrollbar::-webkit-scrollbar {
+  height: 6px;
+  width: 6px;
+}
+.themed-scrollbar::-webkit-scrollbar-track {
+  background: #1a1a2e;
+  border-radius: 999px;
+}
+.themed-scrollbar::-webkit-scrollbar-thumb {
+  background: #7c4daa;
+  border-radius: 999px;
+}
+.themed-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #9b5fd4;
+}
