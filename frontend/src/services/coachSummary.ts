@@ -1,5 +1,10 @@
 import { CoachSummaryRecord } from '@/mocks/coachSummary';
 
+const DEFAULT_API_BASE_URL = import.meta.env.DEV ? 'http://localhost:8000' : '';
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL).replace(/\/+$/, '');
+
+const buildApiUrl = (path: string) => (API_BASE_URL ? `${API_BASE_URL}${path}` : path);
+
 const defaultDates = [
   { start: "2026-04-06", end: "2026-04-12" }, // W1
   { start: "2026-03-30", end: "2026-04-05" }, // W2
@@ -15,7 +20,7 @@ const defaultDates = [
 
 export const fetchCoachSummary = async (): Promise<CoachSummaryRecord[]> => {
   try {
-    const response = await fetch('http://localhost:8000/api/coach-summary/');
+    const response = await fetch(buildApiUrl('/api/coach-summary/'));
     if (!response.ok) {
       throw new Error(`Error: ${response.status} ${response.statusText}`);
     }

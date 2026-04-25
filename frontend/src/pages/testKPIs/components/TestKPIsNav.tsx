@@ -1,7 +1,7 @@
 import { Link, useLocation } from "react-router-dom";
 import ThemeToggle from "@/components/ThemeToggle";
 
-export default function CoachSummaryNav() {
+export default function TestKPIsNav() {
   const now = new Date();
   const dateStr = now.toLocaleDateString("en-GB", {
     weekday: "long", day: "numeric", month: "long", year: "numeric",
@@ -52,15 +52,14 @@ export default function CoachSummaryNav() {
         <div className="flex items-end justify-between gap-8">
           <div>
             <div className="inline-flex items-center gap-2 bg-white/10 rounded-full px-3 py-1 text-xs text-white/60 mb-4">
-              <span className="w-1.5 h-1.5 rounded-full bg-[#7c4daa] inline-block"></span>
-              Absence tracking &mdash; 10-week overview
+              <span className="w-1.5 h-1.5 rounded-full bg-[#e8a838] inline-block"></span>
+              PR &amp; MCM tracking per case owner
             </div>
             <h1 className="text-4xl font-black tracking-tight leading-none mb-2">
-              Coach<br />
-              <span className="text-[#7c4daa]">Summary</span>
+              <span className="text-[#e8a838]">KPIs</span>
             </h1>
             <p className="text-white/40 text-sm mt-3 max-w-xs">
-              Weekly absence ratios per coach across a 10-week rolling window with company benchmarks.
+              Progress review and monthly coaching meeting KPIs broken down by case owner.
             </p>
           </div>
         </div>

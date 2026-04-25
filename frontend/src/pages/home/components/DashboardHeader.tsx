@@ -51,6 +51,7 @@ export default function DashboardHeader({
         <div className="flex items-center gap-6 text-sm text-white/50">
           <span className="text-white/80 font-medium whitespace-nowrap">Coaches Lateness</span>
           <Link to="/coach-summary" className="hover:text-white transition-colors whitespace-nowrap cursor-pointer">Coach Summary</Link>
+          <Link to="/test-kpis" className="hover:text-white transition-colors whitespace-nowrap cursor-pointer">KPIs</Link>
         </div>
         <div className="flex items-center gap-4">
           <ThemeToggle />

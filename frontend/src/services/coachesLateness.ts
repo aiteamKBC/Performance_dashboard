@@ -1,5 +1,10 @@
 import { CoachRecord } from '@/mocks/dashboard';
 
+const DEFAULT_API_BASE_URL = import.meta.env.DEV ? 'http://localhost:8000' : '';
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL).replace(/\/+$/, '');
+
+const buildApiUrl = (path: string) => (API_BASE_URL ? `${API_BASE_URL}${path}` : path);
+
 const toNumber = (value: unknown): number => {
   if (value === null || value === undefined) return 0;
   if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
@@ -9,7 +14,7 @@ const toNumber = (value: unknown): number => {
 
 export const fetchCoachesLateness = async (): Promise<CoachRecord[]> => {
   try {
-    const response = await fetch('http://localhost:8000/api/coaches-lateness/');
+    const response = await fetch(buildApiUrl('/api/coaches-lateness/'));
     if (!response.ok) {
       throw new Error(`Error: ${response.status} ${response.statusText}`);
     }
