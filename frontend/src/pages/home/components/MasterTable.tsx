@@ -138,10 +138,10 @@ export default function MasterTable({ records }: MasterTableProps) {
       : <i className="ri-arrow-down-s-fill text-[#7c4daa] text-[9px] ml-0.5" />;
   };
 
-  const TH = ({ col, label, align = "left" }: { col: SortKey; label: string; align?: string }) => (
+  const TH = ({ col, label, align = "left", sticky = false }: { col: SortKey; label: string; align?: string; sticky?: boolean }) => (
     <th
       onClick={() => handleSort(col)}
-      className={`px-3 py-2.5 text-[10px] text-white/40 uppercase tracking-wide font-semibold cursor-pointer hover:text-white/70 transition-colors whitespace-nowrap select-none text-${align}`}
+      className={`px-3 py-2.5 text-[10px] text-white/40 uppercase tracking-wide font-semibold cursor-pointer hover:text-white/70 transition-colors whitespace-nowrap select-none text-${align}${sticky ? " sticky left-0 z-20 bg-[#111111]" : ""}`}
     >
       <span className="inline-flex items-center gap-0.5">{label}<Sorter col={col} /></span>
     </th>
@@ -176,9 +176,10 @@ export default function MasterTable({ records }: MasterTableProps) {
           <thead>
             <tr className="border-b border-white/5">
               {/* Identity group */}
-              <th colSpan={2} className="px-3 py-2 text-center text-[9px] uppercase tracking-widest text-white/20 font-semibold border-r border-white/5">
+              <th className="px-3 py-2 text-center text-[9px] uppercase tracking-widest text-white/20 font-semibold sticky left-0 z-20 bg-[#111111]">
                 Identity
               </th>
+              <th className="px-3 py-2 text-center text-[9px] uppercase tracking-widest text-white/20 font-semibold border-r border-white/5" />
               {/* Activity group */}
               <th colSpan={3} className="px-3 py-2 text-center text-[9px] uppercase tracking-widest text-white/20 font-semibold border-r border-white/5">
                 Activity
@@ -224,7 +225,7 @@ export default function MasterTable({ records }: MasterTableProps) {
             {/* ── Column header row ── */}
             <tr className="border-b border-white/8 bg-white/[0.02]">
               {/* Identity */}
-              <TH col="coach" label="Coach" />
+              <TH col="coach" label="Coach" sticky />
               <th className="px-3 py-2.5 text-[10px] text-white/40 uppercase tracking-wide font-semibold whitespace-nowrap border-r border-white/5">Phone</th>
 
               {/* Activity */}
@@ -312,8 +313,8 @@ export default function MasterTable({ records }: MasterTableProps) {
                     i % 2 === 0 ? "bg-transparent" : "bg-white/[0.015]"
                   } ${expandedRow === r.id ? "bg-[#7c4daa]/[0.06]" : ""}`}
                 >
-                  {/* Coach — now first */}
-                  <td className="px-3 py-3 whitespace-nowrap">
+                  {/* Coach — sticky first column */}
+                  <td className={`px-3 py-3 whitespace-nowrap sticky left-0 z-10 ${expandedRow === r.id ? "bg-[#7c4daa]/[0.06]" : i % 2 === 0 ? "bg-[#111111]" : "bg-[#121212]"}`}>
                     <span className="text-xs text-white/60 bg-white/5 px-2 py-0.5 rounded-full whitespace-nowrap">{r.coach}</span>
                   </td>
                   {/* Phone */}
@@ -436,9 +437,10 @@ export default function MasterTable({ records }: MasterTableProps) {
             {/* ── Totals row ── */}
             {records.length > 0 && (
               <tr className="border-t-2 border-[#7c4daa]/40 bg-[#7c4daa]/[0.05]">
-                <td colSpan={2} className="px-3 py-3 border-r border-white/5">
+                <td className="px-3 py-3 sticky left-0 z-10 bg-[#0f0a18]">
                   <span className="text-[#c4b5fd] text-xs font-black uppercase tracking-wide">Totals / Avg</span>
                 </td>
+                <td className="px-3 py-3 border-r border-white/5" />
                 {/* Activity cols blank */}
                 <td className="px-3 py-3" />
                 <td className="px-3 py-3" />

@@ -11,6 +11,7 @@ export interface TestKPIsRecord {
   scheduledOverduePR: string;
   unscheduledOverduePR: number;
   scheduledForNextPRPct: string;
+  requiredMCM: number;
   completedMCM: string;
   stillInprogressMCM: number;
   scheduledOverdueMCM: number;
@@ -52,6 +53,7 @@ export const fetchTestKPIs = async (): Promise<TestKPIsRecord[]> => {
       scheduledOverduePR: toStr(item.scheduled_overdue_pr),
       unscheduledOverduePR: toInt(item.unscheduled_overdue_pr),
       scheduledForNextPRPct: toStr(item.scheduled_for_next_pr_pct),
+      requiredMCM: toInt(item.required_mcm),
       completedMCM: toStr(item.completed_mcm),
       stillInprogressMCM: toInt(item.still_inprogress_mcm),
       scheduledOverdueMCM: toInt(item.scheduled_overdue_mcm),

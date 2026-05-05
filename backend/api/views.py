@@ -23,6 +23,7 @@ _KPI_COLUMN_MAP = {
     "scheduled overdue pr":             "scheduled_overdue_pr",
     "unscheduled overdue pr":           "unscheduled_overdue_pr",
     "scheduled for the next pr%":       "scheduled_for_next_pr_pct",
+    "required mcm":                      "required_mcm",
     "completed mcm":                    "completed_mcm",
     "still inprogress mcm":             "still_inprogress_mcm",
     "scheduled overdue mcm":            "scheduled_overdue_mcm",

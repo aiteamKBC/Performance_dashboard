@@ -17,31 +17,18 @@ const columns: { key: SortKey; label: string; group?: string }[] = [
   { key: "unscheduledOverduePR", label: "Unsched. Overdue", group: "PR" },
   { key: "scheduledForNextPRPct", label: "Sched. Next %", group: "PR" },
   // MCM
+  { key: "requiredMCM", label: "Required MCM", group: "MCM" },
   { key: "completedMCM", label: "Completed MCM", group: "MCM" },
   { key: "stillInprogressMCM", label: "In Progress", group: "MCM" },
   { key: "scheduledOverdueMCM", label: "Sched. Overdue", group: "MCM" },
   { key: "unscheduledOverdueMCM", label: "Unsched. Overdue", group: "MCM" },
   { key: "scheduledForNextMCMPct", label: "Sched. Next %", group: "MCM" },
   { key: "learnerEmailsMCM", label: "Learner Emails", group: "MCM" },
-  // Emails
-  { key: "employerEmailsPR", label: "Employer Emails PR", group: "Emails" },
-  // Learners
-  { key: "requiredLearners", label: "Required", group: "Learners" },
-  { key: "scheduledPR", label: "Scheduled PR", group: "Learners" },
-  { key: "scheduledLearners", label: "Scheduled", group: "Learners" },
-  { key: "completedPRLower", label: "Completed PR", group: "Learners" },
-  { key: "completedLearners", label: "Completed", group: "Learners" },
-  { key: "scheduledOverdueLearner", label: "Sched. Overdue", group: "Learners" },
-  { key: "stillInprogressLearner", label: "In Progress", group: "Learners" },
-  { key: "unscheduledOverdueLearners", label: "Unsched. Overdue", group: "Learners" },
-  { key: "scheduledPctPR", label: "Scheduled %", group: "Learners" },
 ];
 
 const groupColors: Record<string, string> = {
   PR: "#7c4daa",
   MCM: "#e8a838",
-  Emails: "#4da8e8",
-  Learners: "#4de87c",
 };
 
 function chipClass(value: number, warnAt: number, riskAt: number) {
@@ -94,7 +81,7 @@ export default function TestKPIsTable({ records }: Props) {
                 <th
                   key={idx}
                   colSpan={g.span}
-                  className="px-3 py-1.5 text-center font-semibold tracking-widest uppercase text-[10px] border-b border-white/5"
+                  className={`px-3 py-1.5 text-center font-semibold tracking-widest uppercase text-[10px] border-b border-white/5${idx === 0 ? " sticky left-0 z-20 bg-[#0f0f0f]" : ""}`}
                   style={{ color: g.color, borderTop: g.label ? `2px solid ${g.color}` : undefined }}
                 >
                   {g.label}
@@ -103,11 +90,11 @@ export default function TestKPIsTable({ records }: Props) {
             </tr>
             {/* Column row */}
             <tr className="bg-white/5">
-              {columns.map(col => (
+              {columns.map((col, idx) => (
                 <th
                   key={col.key}
                   onClick={() => handleSort(col.key)}
-                  className="px-3 py-2 text-left whitespace-nowrap cursor-pointer select-none text-white/50 hover:text-white/80 transition-colors border-b border-white/10"
+                  className={`px-3 py-2 text-left whitespace-nowrap cursor-pointer select-none text-white/50 hover:text-white/80 transition-colors border-b border-white/10${idx === 0 ? " sticky left-0 z-20 bg-[#181818]" : ""}`}
                 >
                   {col.label}
                   {sortKey === col.key && (
@@ -148,6 +135,7 @@ export default function TestKPIsTable({ records }: Props) {
                 </td>
                 <td className="px-3 py-2 text-center text-white/60">{row.scheduledForNextPRPct || "—"}</td>
                 {/* MCM */}
+                <td className="px-3 py-2 text-center text-white/70 font-mono">{row.requiredMCM}</td>
                 <td className="px-3 py-2 text-center text-white/60">{row.completedMCM || "—"}</td>
                 <td className="px-3 py-2 text-center">
                   <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono ${chipClass(row.stillInprogressMCM, 3, 6)}`}>
@@ -166,38 +154,6 @@ export default function TestKPIsTable({ records }: Props) {
                 </td>
                 <td className="px-3 py-2 text-center text-white/60">{row.scheduledForNextMCMPct || "—"}</td>
                 <td className="px-3 py-2 text-center">{row.learnerEmailsMCM}</td>
-                {/* Emails */}
-                <td className="px-3 py-2 text-center">{row.employerEmailsPR}</td>
-                {/* Learners */}
-                <td className="px-3 py-2 text-center">{row.requiredLearners}</td>
-                <td className="px-3 py-2 text-center">{row.scheduledPR}</td>
-                <td className="px-3 py-2 text-center text-white/60">{row.scheduledLearners || "—"}</td>
-                <td className="px-3 py-2 text-center">
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono ${row.completedPRLower > 0 ? "bg-green-900/30 text-green-300 border border-green-700/30" : "bg-white/5 text-white/30"}`}>
-                    {row.completedPRLower}
-                  </span>
-                </td>
-                <td className="px-3 py-2 text-center">
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono ${row.completedLearners > 0 ? "bg-green-900/30 text-green-300 border border-green-700/30" : "bg-white/5 text-white/30"}`}>
-                    {row.completedLearners}
-                  </span>
-                </td>
-                <td className="px-3 py-2 text-center">
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono ${chipClass(row.scheduledOverdueLearner, 2, 5)}`}>
-                    {row.scheduledOverdueLearner}
-                  </span>
-                </td>
-                <td className="px-3 py-2 text-center">
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono ${chipClass(row.stillInprogressLearner, 3, 6)}`}>
-                    {row.stillInprogressLearner}
-                  </span>
-                </td>
-                <td className="px-3 py-2 text-center">
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono ${chipClass(row.unscheduledOverdueLearners, 2, 5)}`}>
-                    {row.unscheduledOverdueLearners}
-                  </span>
-                </td>
-                <td className="px-3 py-2 text-center text-white/60">{row.scheduledPctPR || "—"}</td>
               </tr>
             ))}
             {sorted.length === 0 && (

@@ -50,6 +50,8 @@ class CoachesLateness(models.Model):
     total_pr_required_for_last_8_weeks = models.IntegerField(db_column='Total PR Required for Last 8 Weeks', blank=True, null=True)
     total_pr_done_old_for_last_8_weeks = models.IntegerField(db_column='Total PR Done+Old for Last 8 Weeks', blank=True, null=True)
     acutally_done_pr_for_last_8_weeks = models.IntegerField(db_column='Acutally Done(PR) for Last 8 Weeks', blank=True, null=True)
+    marking_progress_weekly = models.TextField(db_column='Marking Progress Weekly', blank=True, null=True)
+    referred_closure = models.TextField(db_column='Referred Closure', blank=True, null=True)
 
     class Meta:
         managed = False
