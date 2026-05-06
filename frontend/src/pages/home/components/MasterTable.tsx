@@ -200,10 +200,6 @@ export default function MasterTable({ records }: MasterTableProps) {
               <th colSpan={1} className="px-3 py-2 text-center text-[9px] uppercase tracking-widest text-[#a8f0c6]/50 font-semibold border-r border-white/5">
                 Evidence Pipeline
               </th>
-              {/* PR Daily group */}
-              <th colSpan={3} className="px-3 py-2 text-center text-[9px] uppercase tracking-widest text-[#c4b5fd]/60 font-semibold border-r border-white/5">
-                PR Daily
-              </th>
               {/* PR Weekly group */}
               <th colSpan={4} className="px-3 py-2 text-center text-[9px] uppercase tracking-widest text-[#c4b5fd]/60 font-semibold border-r border-white/5">
                 PR Weekly
@@ -263,13 +259,6 @@ export default function MasterTable({ records }: MasterTableProps) {
               {/* Evidence */}
               <th onClick={() => handleSort("referredClosure")} className="px-3 py-2.5 text-[10px] text-white/40 uppercase tracking-wide font-semibold cursor-pointer hover:text-white/70 transition-colors whitespace-nowrap select-none border-r border-white/5">
                 <span className="inline-flex items-center gap-0.5">Referred Closure<Sorter col="referredClosure" /></span>
-              </th>
-
-              {/* PR Daily */}
-              <TH col="prToday" label="Today" />
-              <TH col="prYesterday" label="Yesterday" />
-              <th onClick={() => handleSort("prMinus2")} className="px-3 py-2.5 text-[10px] text-white/40 uppercase tracking-wide font-semibold cursor-pointer hover:text-white/70 transition-colors whitespace-nowrap select-none border-r border-white/5">
-                <span className="inline-flex items-center gap-0.5">-2<Sorter col="prMinus2" /></span>
               </th>
 
               {/* PR Weekly */}
@@ -369,10 +358,6 @@ export default function MasterTable({ records }: MasterTableProps) {
                   {/* Referred Closure */}
                   <td className="px-3 py-3 whitespace-nowrap text-center border-r border-white/5"><Plain val={r.referredClosure} /></td>
 
-                  {/* ── PR Daily ── */}
-                  <td className="px-3 py-3 whitespace-nowrap text-center"><span className="text-xs font-mono text-[#c4b5fd]">{r.prToday}</span></td>
-                  <td className="px-3 py-3 whitespace-nowrap text-center"><span className="text-xs font-mono text-white/60">{r.prYesterday}</span></td>
-                  <td className="px-3 py-3 whitespace-nowrap text-center border-r border-white/5"><span className="text-xs font-mono text-white/60">{r.prMinus2}</span></td>
 
                   {/* ── PR Weekly ── */}
                   <td className="px-3 py-3 whitespace-nowrap text-center"><span className="text-xs font-mono text-white/70">{r.prLastWeek}</span></td>
@@ -461,10 +446,6 @@ export default function MasterTable({ records }: MasterTableProps) {
                 <td className="px-3 py-3 border-r border-white/5"><span className="text-[#a8f0c6] font-mono text-xs">{formatMarkingProgressWeekly(totals.markingProgressWeekly)}</span></td>
                 {/* Evidence totals */}
                 <td className="px-3 py-3 text-center border-r border-white/5"><span className="text-white/70 font-mono text-xs">{totals.referredClosure}</span></td>
-                {/* PR Daily totals */}
-                <td className="px-3 py-3 text-center"><span className="text-[#c4b5fd] font-mono text-xs font-bold">{totals.prToday}</span></td>
-                <td className="px-3 py-3 text-center"><span className="text-white/60 font-mono text-xs">{totals.prYesterday}</span></td>
-                <td className="px-3 py-3 text-center border-r border-white/5"><span className="text-white/60 font-mono text-xs">{totals.prMinus2}</span></td>
                 {/* PR Weekly totals */}
                 <td className="px-3 py-3 text-center"><span className="text-white/70 font-mono text-xs">{totals.prLastWeek}</span></td>
                 <td className="px-3 py-3 text-center"><span className="text-white/50 font-mono text-xs">{totals.prSecondWeek}</span></td>

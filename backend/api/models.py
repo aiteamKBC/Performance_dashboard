@@ -33,6 +33,8 @@ class CoachesLateness(models.Model):
     field_fourth_week_pr = models.IntegerField(db_column='- Fourth Week PR', blank=True, null=True)
     total_pr_done_old_for_last_4_weeks = models.IntegerField(db_column='Total PR Done+Old for Last 4 Weeks', blank=True, null=True)
     acutally_done_for_last_4_weeks = models.IntegerField(db_column='Acutally Done for Last 4 Weeks', blank=True, null=True)
+    pr_completed_for_last_4_weeks = models.IntegerField(db_column='PR Completed for Last 4 Weeks', blank=True, null=True)
+    pr_completed_for_last_8_weeks = models.IntegerField(db_column='PR Completed for Last 8 Weeks', blank=True, null=True)
     total_pr_required_for_last_4_weeks = models.IntegerField(db_column='Total PR Required for Last 4 Weeks', blank=True, null=True)
     overall_pr_required = models.IntegerField(db_column='Overall (PR) Required', blank=True, null=True)
     overall_pr_behind = models.IntegerField(db_column='Overall (PR) Behind', blank=True, null=True)

@@ -30,9 +30,9 @@ export const fetchCoachesLateness = async (): Promise<CoachRecord[]> => {
       const totalEvidence = toNumber(item.total_evidence);
 
       const prRequired4Weeks = toNumber(item.total_pr_required_for_last_4_weeks);
-      const prCompleted4Weeks = toNumber(item.acutally_done_for_last_4_weeks);
+      const prCompleted4Weeks = toNumber(item.pr_completed_for_last_4_weeks ?? item.acutally_done_for_last_4_weeks);
       const prRequired8Weeks = toNumber(item.total_pr_required_for_last_8_weeks);
-      const prCompleted8Weeks = toNumber(item.acutally_done_pr_for_last_8_weeks);
+      const prCompleted8Weeks = toNumber(item.pr_completed_for_last_8_weeks ?? item.acutally_done_pr_for_last_8_weeks);
       const prOverallRequired = toNumber(item.overall_pr_required);
       const prOverallCompleted = toNumber(item.overall_pr_completed);
 
