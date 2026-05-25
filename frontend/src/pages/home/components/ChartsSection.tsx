@@ -6,6 +6,7 @@ import { CoachRecord } from "@/mocks/dashboard";
 
 interface ChartsSectionProps {
   records: CoachRecord[];
+  onDrill: (chartId: string) => void;
 }
 
 interface CaseOwnerAggregate {
@@ -53,10 +54,11 @@ const formatCaseOwnerLabel = (value: string | number) => {
   return `${parts[0]} ${parts[1][0]}.`;
 };
 
-function ChartCard({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+function ChartCard({ title, subtitle, drillId, onDrill, children }: { title: string; subtitle?: string; drillId?: string; onDrill?: (id: string) => void; children: React.ReactNode }) {
   return (
     <div
-      className="rounded-2xl border border-white/15 p-5 flex flex-col gap-3 overflow-hidden isolate"
+      onClick={() => drillId && onDrill?.(drillId)}
+      className={`rounded-2xl border border-white/15 p-5 flex flex-col gap-3 overflow-hidden isolate transition-colors ${drillId ? "cursor-pointer hover:border-[#7c4daa]/50 hover:bg-white/[0.02]" : ""}`}
       style={{
         background: "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.035) 100%), rgba(18,18,22,0.92)",
         boxShadow: "inset 0 1px 0 rgba(255,255,255,0.10), 0 8px 32px rgba(0,0,0,0.35)",
@@ -64,9 +66,16 @@ function ChartCard({ title, subtitle, children }: { title: string; subtitle?: st
         willChange: "transform",
       }}
     >
-      <div>
-        <p className="text-[10px] uppercase tracking-widest text-white/25 mb-0.5">{subtitle ?? "CaseOwner"}</p>
-        <h3 className="text-white font-bold text-sm leading-tight">{title}</h3>
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <p className="text-[10px] uppercase tracking-widest text-white/25 mb-0.5">{subtitle ?? "CaseOwner"}</p>
+          <h3 className="text-white font-bold text-sm leading-tight">{title}</h3>
+        </div>
+        {drillId && (
+          <span className="shrink-0 flex items-center gap-1 text-[10px] text-white/25 mt-0.5">
+            <i className="ri-zoom-in-line text-xs" /> Drill
+          </span>
+        )}
       </div>
       {children}
     </div>
@@ -127,7 +136,7 @@ function aggregateByCaseOwner(records: CoachRecord[]): CaseOwnerAggregate[] {
   return Array.from(grouped.values());
 }
 
-export default function ChartsSection({ records }: ChartsSectionProps) {
+export default function ChartsSection({ records, onDrill }: ChartsSectionProps) {
   if (records.length === 0) {
     return (
       <div className="rounded-2xl border border-white/15 p-8 text-center text-white/30 text-sm" style={{ background: "rgba(255,255,255,0.05)", backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)" }}>
@@ -198,7 +207,7 @@ export default function ChartsSection({ records }: ChartsSectionProps) {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <ChartCard title="Learner Engagement vs. CaseOwner" subtitle="CaseOwner">
+        <ChartCard title="Learner Engagement vs. CaseOwner" subtitle="CaseOwner" drillId="engagement" onDrill={onDrill}>
           <ResponsiveContainer width="100%" height={160}>
             <BarChart data={engagementData} margin={{ top: 4, right: 8, left: -20, bottom: 30 }}>
               <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.05)" />
@@ -210,7 +219,7 @@ export default function ChartsSection({ records }: ChartsSectionProps) {
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Referred Closure vs. CaseOwner" subtitle="CaseOwner">
+        <ChartCard title="Referred Closure vs. CaseOwner" subtitle="CaseOwner" drillId="closure" onDrill={onDrill}>
           <ResponsiveContainer width="100%" height={160}>
             <BarChart data={closureData} margin={{ top: 4, right: 8, left: -20, bottom: 30 }}>
               <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.05)" />
@@ -222,7 +231,7 @@ export default function ChartsSection({ records }: ChartsSectionProps) {
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Marking Progress Weekly" subtitle="week over week (%)">
+        <ChartCard title="Marking Progress Weekly" subtitle="week over week (%)" drillId="marking" onDrill={onDrill}>
           <ResponsiveContainer width="100%" height={160}>
             <BarChart data={markingData} margin={{ top: 4, right: 8, left: -20, bottom: 30 }}>
               <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.05)" />
@@ -237,7 +246,7 @@ export default function ChartsSection({ records }: ChartsSectionProps) {
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="md:col-span-2">
-          <ChartCard title="OTJH Status" subtitle="Need Attention / Normal / OnTrack">
+          <ChartCard title="OTJH Status" subtitle="Need Attention / Normal / OnTrack" drillId="otjh" onDrill={onDrill}>
             <ResponsiveContainer width="100%" height={200}>
               <BarChart data={otjhData} margin={{ top: 4, right: 8, left: -20, bottom: 30 }}>
                 <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.05)" />
@@ -245,15 +254,15 @@ export default function ChartsSection({ records }: ChartsSectionProps) {
                 <YAxis tick={axisStyle} />
                 <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={cursorStyle} />
                 <Legend wrapperStyle={{ fontSize: 10, color: "rgba(255,255,255,0.5)", paddingTop: 8 }} />
-                <Bar dataKey="OnTrack" stackId="a" fill={BLUE} maxBarSize={36} />
-                <Bar dataKey="Normal" stackId="a" fill={PURPLE} maxBarSize={36} />
-                <Bar dataKey="Need Attention" stackId="a" fill={YELLOW} radius={[3, 3, 0, 0]} maxBarSize={36} />
+                <Bar dataKey="OnTrack" stackId="a" fill="#22c55e" maxBarSize={36} />
+                <Bar dataKey="Normal" stackId="a" fill="#f59e0b" maxBarSize={36} />
+                <Bar dataKey="Need Attention" stackId="a" fill="#ef4444" radius={[3, 3, 0, 0]} maxBarSize={36} />
               </BarChart>
             </ResponsiveContainer>
           </ChartCard>
         </div>
 
-        <ChartCard title="Completion Rate (PR) for Last 4 Weeks" subtitle="CaseOwner">
+        <ChartCard title="Completion Rate (PR) for Last 4 Weeks" subtitle="CaseOwner" drillId="pr4weeks" onDrill={onDrill}>
           <ResponsiveContainer width="100%" height={200}>
             <BarChart data={pr4WeeksData} margin={{ top: 4, right: 8, left: -20, bottom: 30 }}>
               <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.05)" />
@@ -267,7 +276,7 @@ export default function ChartsSection({ records }: ChartsSectionProps) {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <ChartCard title="Overall Completion(PR)" subtitle="CaseOwner">
+        <ChartCard title="Overall Completion(PR)" subtitle="CaseOwner" drillId="overall-pr" onDrill={onDrill}>
           <ResponsiveContainer width="100%" height={180}>
             <BarChart data={overallPrData} margin={{ top: 4, right: 8, left: -20, bottom: 30 }}>
               <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.05)" />
@@ -279,7 +288,7 @@ export default function ChartsSection({ records }: ChartsSectionProps) {
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Last Week and current Week Assignment" subtitle="CaseOwner">
+        <ChartCard title="Last Week and current Week Assignment" subtitle="CaseOwner" drillId="assignment" onDrill={onDrill}>
           <ResponsiveContainer width="100%" height={180}>
             <BarChart data={assignmentData} margin={{ top: 4, right: 8, left: -20, bottom: 30 }}>
               <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.05)" />
@@ -293,7 +302,7 @@ export default function ChartsSection({ records }: ChartsSectionProps) {
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Progress Review Performance" subtitle="CaseOwner">
+        <ChartCard title="Progress Review Performance" subtitle="CaseOwner" drillId="pr-perf" onDrill={onDrill}>
           <ResponsiveContainer width="100%" height={180}>
             <BarChart data={prPerfData} margin={{ top: 4, right: 8, left: -20, bottom: 30 }}>
               <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.05)" />

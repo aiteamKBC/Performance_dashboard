@@ -4,10 +4,12 @@ import { fetchCoachesLateness } from "@/services/coachesLateness";
 import DashboardHeader from "./components/DashboardHeader";
 import ChartsSection from "./components/ChartsSection";
 import MasterTable from "./components/MasterTable";
+import ChartDrillDrawer from "./components/ChartDrillDrawer";
 
 export default function Home() {
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCoach, setActiveCoach] = useState("All");
+  const [drillChartId, setDrillChartId] = useState<string | null>(null);
   const [coachRecords, setCoachRecords] = useState<CoachRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -144,11 +146,17 @@ export default function Home() {
 
       {/* Main content */}
       <main className="px-8 py-6 max-w-[1600px] mx-auto space-y-6">
+        <ChartsSection records={filtered} onDrill={setDrillChartId} />
         <MasterTable records={filtered} />
-        <ChartsSection records={filtered} />
 
 
       </main>
+
+      <ChartDrillDrawer
+        chartId={drillChartId}
+        records={filtered}
+        onClose={() => setDrillChartId(null)}
+      />
     </div>
   );
 }

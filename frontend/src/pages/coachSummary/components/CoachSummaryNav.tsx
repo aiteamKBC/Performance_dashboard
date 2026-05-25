@@ -26,7 +26,13 @@ export default function CoachSummaryNav() {
             to="/"
             className={`transition-colors whitespace-nowrap cursor-pointer ${location.pathname === "/" ? "text-white/80 font-medium" : "hover:text-white"}`}
           >
-            Coaches Lateness
+            Coaches
+          </Link>
+          <Link
+            to="/dashboard"
+            className={`transition-colors whitespace-nowrap cursor-pointer ${location.pathname === "/dashboard" ? "text-white/80 font-medium" : "hover:text-white"}`}
+          >
+            Lateness
           </Link>
           <Link
             to="/coach-summary"

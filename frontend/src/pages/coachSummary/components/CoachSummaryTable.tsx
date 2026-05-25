@@ -3,7 +3,7 @@ import { CoachSummaryRecord } from "@/mocks/coachSummary";
 const WEEKS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
 function ratioColor(ratio: number, isOverall?: boolean): string {
-  if (ratio === 0) return "bg-[#1a3a2a] text-[#4ade80]";
+  if (ratio === 0) return "bg-[#1a3a2a] text-[#22c55e]";
   if (ratio < 15) return "bg-[#1a2a1a] text-[#86efac]";
   if (ratio < 25) return isOverall ? "bg-[#3a1a00] text-[#fb923c]" : "bg-[#2a1a00] text-[#fbbf24]";
   return "bg-[#3a1010] text-[#f87171]";
@@ -35,7 +35,7 @@ export default function CoachSummaryTable({ records }: { records: CoachSummaryRe
         </div>
         <div className="flex items-center gap-4 text-xs text-white/30">
           <span className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-[#4ade80] inline-block" />Perfect
+            <span className="w-2 h-2 rounded-full bg-[#22c55e] inline-block" />Perfect
           </span>
           <span className="flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-[#86efac] inline-block" />&lt;15%
