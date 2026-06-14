@@ -370,6 +370,11 @@ p, li { line-height: var(--leading-normal); }
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: var(--space-4);
+  align-items: stretch;
+}
+
+.chart-grid > .chart-card {
+  height: 100%;
 }
 
 @media (max-width: 1200px) {
