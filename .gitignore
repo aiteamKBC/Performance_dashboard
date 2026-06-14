@@ -22,6 +22,10 @@ backend/__pycache__/
 backend/**/*.pyc
 backend/.pytest_cache/
 backend/.mypy_cache/
+backend/.env
 
 # Local database and caches
 backend/db.sqlite3
+
+.gitignore
+
