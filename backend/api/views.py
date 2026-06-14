@@ -5,10 +5,30 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from .models import CoachesLateness, CoachSummary
 from .serializers import CoachesLatenessSerializer, CoachSummarySerializer
+from .lateness_compute import compute_coaches_lateness, compute_coach_drill
 
 class CoachesLatenessViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = CoachesLateness.objects.all()
     serializer_class = CoachesLatenessSerializer
+
+    def list(self, request, *args, **kwargs):
+        # Computed live from the raw source tables (aptem_auto_extracting,
+        # progress_review, MCR) instead of the pre-aggregated coaches_lateness
+        # table. See api/lateness_compute.py.
+        return Response(compute_coaches_lateness())
+
+
+class CoachDrillView(APIView):
+    """Learner-level breakdown for a single coach (drill-down drawer)."""
+    def get(self, request):
+        coach_name = request.query_params.get("coach")
+        case_owner_id = request.query_params.get("case_owner_id")
+        if case_owner_id is not None:
+            try:
+                case_owner_id = int(case_owner_id)
+            except (TypeError, ValueError):
+                case_owner_id = None
+        return Response(compute_coach_drill(coach_name=coach_name, case_owner_id=case_owner_id))
 
 class CoachSummaryViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = CoachSummary.objects.all()

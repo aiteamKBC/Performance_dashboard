@@ -9,14 +9,12 @@ type SortKey = keyof TestKPIsRecord;
 
 const columns: { key: SortKey; label: string; group?: string }[] = [
   { key: "caseOwner", label: "Case Owner" },
-  // PR
   { key: "requiredPR", label: "Required PR", group: "PR" },
   { key: "completedPR", label: "Completed PR", group: "PR" },
   { key: "stillInprogressPR", label: "In Progress", group: "PR" },
   { key: "scheduledOverduePR", label: "Sched. Overdue", group: "PR" },
   { key: "unscheduledOverduePR", label: "Unsched. Overdue", group: "PR" },
   { key: "scheduledForNextPRPct", label: "Sched. Next %", group: "PR" },
-  // MCM
   { key: "requiredMCM", label: "Required MCM", group: "MCM" },
   { key: "completedMCM", label: "Completed MCM", group: "MCM" },
   { key: "stillInprogressMCM", label: "In Progress", group: "MCM" },
@@ -27,15 +25,14 @@ const columns: { key: SortKey; label: string; group?: string }[] = [
 ];
 
 const groupColors: Record<string, string> = {
-  PR: "#7c4daa",
-  MCM: "#e8a838",
+  PR: "var(--color-accent)",
+  MCM: "var(--color-warning)",
 };
 
-function chipClass(value: number, warnAt: number, riskAt: number) {
-  if (value === 0) return "bg-white/5 text-white/30";
-  if (value >= riskAt) return "bg-red-900/40 text-red-300 border border-red-700/40";
-  if (value >= warnAt) return "bg-yellow-900/40 text-yellow-300 border border-yellow-700/40";
-  return "bg-green-900/30 text-green-300 border border-green-700/30";
+function StatusBadge({ value, warnAt, riskAt }: { value: number; warnAt: number; riskAt: number }) {
+  if (value === 0) return <span style={{ color: "var(--color-text-muted)", fontSize: "var(--text-xs)" }}>—</span>;
+  const cls = value >= riskAt ? "badge--danger" : value >= warnAt ? "badge--warning" : "badge--success";
+  return <span className={`badge ${cls}`}>{value}</span>;
 }
 
 export default function TestKPIsTable({ records }: Props) {
@@ -56,7 +53,6 @@ export default function TestKPIsTable({ records }: Props) {
     return sortAsc ? cmp : -cmp;
   });
 
-  // Build group header spans
   const groups: { label: string; span: number; color: string }[] = [];
   let i = 0;
   while (i < columns.length) {
@@ -65,106 +61,138 @@ export default function TestKPIsTable({ records }: Props) {
     else {
       let span = 0;
       while (i + span < columns.length && columns[i + span].group === g) span++;
-      groups.push({ label: g, span, color: groupColors[g] ?? "#888" });
+      groups.push({ label: g, span, color: groupColors[g] ?? "var(--color-text-muted)" });
       i += span;
     }
   }
 
   return (
-    <div className="rounded-xl border border-white/10 overflow-hidden bg-[#0f0f0f]">
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs text-white/80 border-collapse">
-          <thead>
-            {/* Group row */}
-            <tr>
-              {groups.map((g, idx) => (
-                <th
-                  key={idx}
-                  colSpan={g.span}
-                  className={`px-3 py-1.5 text-center font-semibold tracking-widest uppercase text-[10px] border-b border-white/5${idx === 0 ? " sticky left-0 z-20 bg-[#0f0f0f]" : ""}`}
-                  style={{ color: g.color, borderTop: g.label ? `2px solid ${g.color}` : undefined }}
-                >
-                  {g.label}
-                </th>
-              ))}
-            </tr>
-            {/* Column row */}
-            <tr className="bg-white/5">
-              {columns.map((col, idx) => (
-                <th
-                  key={col.key}
-                  onClick={() => handleSort(col.key)}
-                  className={`px-3 py-2 text-left whitespace-nowrap cursor-pointer select-none text-white/50 hover:text-white/80 transition-colors border-b border-white/10${idx === 0 ? " sticky left-0 z-20 bg-[#181818]" : ""}`}
-                >
-                  {col.label}
-                  {sortKey === col.key && (
-                    <span className="ml-1 text-[10px]">{sortAsc ? "▲" : "▼"}</span>
-                  )}
-                </th>
-              ))}
-            </tr>
-          </thead>
+    <div className="table-card">
+      <div className="table-toolbar">
+        <div>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>KPI Breakdown</div>
+          <h2 style={{ margin: 0, fontSize: "var(--text-md)", fontWeight: "var(--font-semibold)" }}>PR &amp; MCM by Case Owner</h2>
+        </div>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+          <span className="badge badge--success">Good</span>
+          <span className="badge badge--warning">Warning</span>
+          <span className="badge badge--danger">At Risk</span>
+          <span className="tabular-nums" style={{ fontSize: "var(--text-sm)", color: "var(--color-text-muted)" }}>{records.length} rows</span>
+        </div>
+      </div>
+
+      {sorted.length === 0 && (
+        <table className="data-table">
           <tbody>
-            {sorted.map((row, ri) => (
-              <tr
-                key={row.caseOwner}
-                className={`border-b border-white/5 transition-colors ${ri % 2 === 0 ? "bg-transparent" : "bg-white/[0.02]"} hover:bg-white/[0.05]`}
-              >
-                <td className="px-3 py-2 font-medium text-white/90 whitespace-nowrap sticky left-0 bg-[#0f0f0f] z-10">
-                  {row.caseOwner}
-                </td>
-                {/* Required PR */}
-                <td className="px-3 py-2 text-center">{row.requiredPR}</td>
-                {/* Completed PR — good if high */}
-                <td className="px-3 py-2 text-center">
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono ${row.completedPR > 0 ? "bg-green-900/30 text-green-300 border border-green-700/30" : "bg-white/5 text-white/30"}`}>
-                    {row.completedPR}
-                  </span>
-                </td>
-                {/* In Progress PR */}
-                <td className="px-3 py-2 text-center">
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono ${chipClass(row.stillInprogressPR, 3, 6)}`}>
-                    {row.stillInprogressPR}
-                  </span>
-                </td>
-                <td className="px-3 py-2 text-center text-white/50">{row.scheduledOverduePR || "—"}</td>
-                <td className="px-3 py-2 text-center">
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono ${chipClass(row.unscheduledOverduePR, 2, 5)}`}>
-                    {row.unscheduledOverduePR}
-                  </span>
-                </td>
-                <td className="px-3 py-2 text-center text-white/60">{row.scheduledForNextPRPct || "—"}</td>
-                {/* MCM */}
-                <td className="px-3 py-2 text-center text-white/70 font-mono">{row.requiredMCM}</td>
-                <td className="px-3 py-2 text-center text-white/60">{row.completedMCM || "—"}</td>
-                <td className="px-3 py-2 text-center">
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono ${chipClass(row.stillInprogressMCM, 3, 6)}`}>
-                    {row.stillInprogressMCM}
-                  </span>
-                </td>
-                <td className="px-3 py-2 text-center">
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono ${chipClass(row.scheduledOverdueMCM, 2, 5)}`}>
-                    {row.scheduledOverdueMCM}
-                  </span>
-                </td>
-                <td className="px-3 py-2 text-center">
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono ${chipClass(row.unscheduledOverdueMCM, 2, 5)}`}>
-                    {row.unscheduledOverdueMCM}
-                  </span>
-                </td>
-                <td className="px-3 py-2 text-center text-white/60">{row.scheduledForNextMCMPct || "—"}</td>
-                <td className="px-3 py-2 text-center">{row.learnerEmailsMCM}</td>
-              </tr>
-            ))}
-            {sorted.length === 0 && (
-              <tr>
-                <td colSpan={columns.length} className="px-3 py-8 text-center text-white/30">
-                  No data available
-                </td>
-              </tr>
-            )}
+            <tr className="table-empty">
+              <td colSpan={columns.length}>
+                <div className="empty-state">
+                  <span className="empty-state-icon">📋</span>
+                  <p className="empty-state-title">No KPI data available</p>
+                  <p className="empty-state-body">Data will appear once the API returns records.</p>
+                </div>
+              </td>
+            </tr>
           </tbody>
         </table>
+      )}
+
+      {sorted.length > 0 && (
+        <div className="table-scroll themed-scrollbar">
+          <table className="data-table">
+            <thead>
+              <tr>
+                {groups.map((g, idx) => (
+                  <th
+                    key={idx}
+                    scope="col"
+                    colSpan={g.span}
+                    style={{
+                      textAlign: "center",
+                      color: g.label ? g.color : "transparent",
+                      borderTop: g.label ? `2px solid ${g.color}` : undefined,
+                      position: idx === 0 ? "sticky" : undefined,
+                      left: idx === 0 ? 0 : undefined,
+                      zIndex: idx === 0 ? 20 : undefined,
+                      background: "var(--color-canvas)",
+                      padding: "var(--space-2) var(--space-4)",
+                      textTransform: "uppercase", letterSpacing: "0.06em",
+                    }}
+                  >
+                    {g.label}
+                  </th>
+                ))}
+              </tr>
+              <tr>
+                {columns.map((col, idx) => (
+                  <th
+                    key={col.key}
+                    scope="col"
+                    onClick={() => handleSort(col.key)}
+                    aria-sort={sortKey === col.key ? (sortAsc ? "ascending" : "descending") : undefined}
+                    style={{
+                      position: idx === 0 ? "sticky" : undefined,
+                      left: idx === 0 ? 0 : undefined,
+                      zIndex: idx === 0 ? 20 : undefined,
+                      background: "var(--color-canvas)",
+                      color: sortKey === col.key ? "var(--color-accent)" : "var(--color-text-muted)",
+                      textAlign: idx === 0 ? "left" : "center",
+                    }}
+                  >
+                    {col.label}
+                    {sortKey === col.key && (
+                      <span style={{ marginLeft: 2, fontSize: 9 }}>{sortAsc ? "▲" : "▼"}</span>
+                    )}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((row, ri) => (
+                <tr key={row.caseOwner} style={{ background: ri % 2 === 0 ? "transparent" : "rgba(0,0,0,0.015)" }}>
+                  <th scope="row" style={{
+                    position: "sticky", left: 0, zIndex: 10,
+                    background: ri % 2 === 0 ? "var(--color-surface)" : "var(--color-canvas)",
+                    padding: "var(--space-3) var(--space-4)",
+                    fontWeight: "var(--font-medium)", color: "var(--color-text-primary)",
+                    fontSize: "var(--text-xs)", whiteSpace: "nowrap", textAlign: "left",
+                  }}>
+                    {row.caseOwner}
+                  </th>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)" }}>{row.requiredPR}</td>
+                  <td style={{ padding: "var(--space-3) var(--space-4)", textAlign: "center" }}>
+                    <span className={`badge ${row.completedPR > 0 ? "badge--success" : ""}`}>{row.completedPR || "—"}</span>
+                  </td>
+                  <td style={{ padding: "var(--space-3) var(--space-4)", textAlign: "center" }}>
+                    <StatusBadge value={row.stillInprogressPR} warnAt={3} riskAt={6} />
+                  </td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)" }}>{row.scheduledOverduePR || "—"}</td>
+                  <td style={{ padding: "var(--space-3) var(--space-4)", textAlign: "center" }}>
+                    <StatusBadge value={row.unscheduledOverduePR} warnAt={2} riskAt={5} />
+                  </td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)" }}>{row.scheduledForNextPRPct || "—"}</td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)" }}>{row.requiredMCM}</td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)" }}>{row.completedMCM || "—"}</td>
+                  <td style={{ padding: "var(--space-3) var(--space-4)", textAlign: "center" }}>
+                    <StatusBadge value={row.stillInprogressMCM} warnAt={3} riskAt={6} />
+                  </td>
+                  <td style={{ padding: "var(--space-3) var(--space-4)", textAlign: "center" }}>
+                    <StatusBadge value={row.scheduledOverdueMCM} warnAt={2} riskAt={5} />
+                  </td>
+                  <td style={{ padding: "var(--space-3) var(--space-4)", textAlign: "center" }}>
+                    <StatusBadge value={row.unscheduledOverdueMCM} warnAt={2} riskAt={5} />
+                  </td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)" }}>{row.scheduledForNextMCMPct || "—"}</td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)" }}>{row.learnerEmailsMCM}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="table-footer">
+        <span>{records.length} case owners</span>
       </div>
     </div>
   );

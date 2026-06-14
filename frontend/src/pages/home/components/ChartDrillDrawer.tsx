@@ -10,11 +10,11 @@ const BLUE   = "var(--home-chart-blue)";
 const RED    = "var(--home-chart-red)";
 const YELLOW = "var(--home-chart-yellow)";
 
-const ttStyle  = { backgroundColor: "#1e1e2e", border: "1px solid rgba(255,255,255,0.15)", borderRadius: "8px", color: "#ffffff", fontSize: "11px" };
-const ttLabel  = { color: "#ffffff", fontWeight: 600 };
-const ttItem   = { color: "#d1d5db" };
-const ttCursor = { fill: "rgba(255,255,255,0.04)" };
-const ax       = { fontSize: 11, fill: "rgba(255,255,255,0.6)" };
+const ttStyle  = { backgroundColor: "#ffffff", border: "1px solid #E5E7EB", borderRadius: "8px", color: "#111827", fontSize: "11px", boxShadow: "0 4px 12px rgba(0,0,0,0.08)" };
+const ttLabel  = { color: "#111827", fontWeight: 600 };
+const ttItem   = { color: "#6B7280" };
+const ttCursor = { fill: "#EEF2FF" };
+const ax       = { fontSize: 11, fill: "#9CA3AF" };
 
 const fmtLabel = (v: string | number) => {
   const s = String(v ?? "").trim();
@@ -91,7 +91,7 @@ export const CHART_DEFS: ChartDef[] = [
     buildData: (agg) => agg.map((r) => ({ name: r.name, Engagement: toPercent(r.recentSubmitters, r.totalLearners) })),
     renderChart: (data) => (
       <BarChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 44 }}>
-        <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.05)" />
+        <CartesianGrid vertical={false} stroke="var(--color-border)" />
         <XAxis dataKey="name" tick={ax} angle={-28} textAnchor="end" interval={0} height={60} tickMargin={6} tickFormatter={fmtLabel} />
         <YAxis tick={ax} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
         <Tooltip contentStyle={ttStyle} labelStyle={ttLabel} itemStyle={ttItem} cursor={ttCursor} formatter={(v) => [`${v}%`, "Engagement"]} />
@@ -112,7 +112,7 @@ export const CHART_DEFS: ChartDef[] = [
     buildData: (agg) => agg.map((r) => ({ name: r.name, ReferredClosure: r.referredClosure })),
     renderChart: (data) => (
       <BarChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 44 }}>
-        <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.05)" />
+        <CartesianGrid vertical={false} stroke="var(--color-border)" />
         <XAxis dataKey="name" tick={ax} angle={-28} textAnchor="end" interval={0} height={60} tickMargin={6} tickFormatter={fmtLabel} />
         <YAxis tick={ax} allowDecimals={false} />
         <Tooltip contentStyle={ttStyle} labelStyle={ttLabel} itemStyle={ttItem} cursor={ttCursor} formatter={(v) => [v, "Closure"]} />
@@ -136,7 +136,7 @@ export const CHART_DEFS: ChartDef[] = [
     }),
     renderChart: (data) => (
       <BarChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 44 }}>
-        <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.05)" />
+        <CartesianGrid vertical={false} stroke="var(--color-border)" />
         <XAxis dataKey="name" tick={ax} angle={-28} textAnchor="end" interval={0} height={60} tickMargin={6} tickFormatter={fmtLabel} />
         <YAxis tick={ax} domain={[-100, 100]} tickFormatter={(v) => `${v}%`} />
         <Tooltip contentStyle={ttStyle} labelStyle={ttLabel} itemStyle={ttItem} cursor={ttCursor} formatter={(v) => [`${v}%`, "Marking"]} />
@@ -161,11 +161,11 @@ export const CHART_DEFS: ChartDef[] = [
     })),
     renderChart: (data) => (
       <BarChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 44 }}>
-        <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.05)" />
+        <CartesianGrid vertical={false} stroke="var(--color-border)" />
         <XAxis dataKey="name" tick={ax} angle={-20} textAnchor="end" interval={0} height={60} tickMargin={6} tickFormatter={fmtLabel} />
         <YAxis tick={ax} />
         <Tooltip contentStyle={ttStyle} labelStyle={ttLabel} itemStyle={ttItem} cursor={ttCursor} />
-        <Legend wrapperStyle={{ fontSize: 10, color: "rgba(255,255,255,0.5)", paddingTop: 8 }} />
+        <Legend wrapperStyle={{ fontSize: 10, color: "#6B7280", paddingTop: 8 }} />
         <Bar dataKey="OnTrack" stackId="a" fill="#22c55e" maxBarSize={44} />
         <Bar dataKey="Normal" stackId="a" fill="#f59e0b" maxBarSize={44} />
         <Bar dataKey="Need Attention" stackId="a" fill="#ef4444" radius={[4, 4, 0, 0]} maxBarSize={44} />
@@ -185,7 +185,7 @@ export const CHART_DEFS: ChartDef[] = [
     buildData: (agg) => agg.map((r) => ({ name: r.name, "4Wk Rate": toPercent(r.prCompleted4Weeks, r.prRequired4Weeks) })),
     renderChart: (data) => (
       <BarChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 44 }}>
-        <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.05)" />
+        <CartesianGrid vertical={false} stroke="var(--color-border)" />
         <XAxis dataKey="name" tick={ax} angle={-28} textAnchor="end" interval={0} height={60} tickMargin={6} tickFormatter={fmtLabel} />
         <YAxis tick={ax} domain={[0, 110]} tickFormatter={(v) => `${v}%`} />
         <Tooltip contentStyle={ttStyle} labelStyle={ttLabel} itemStyle={ttItem} cursor={ttCursor} formatter={(v) => [`${v}%`, "4Wk Rate"]} />
@@ -206,7 +206,7 @@ export const CHART_DEFS: ChartDef[] = [
     buildData: (agg) => agg.map((r) => ({ name: r.name, "Completion%": toPercent(r.prOverallCompleted, r.prOverallRequired) })),
     renderChart: (data) => (
       <BarChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 44 }}>
-        <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.05)" />
+        <CartesianGrid vertical={false} stroke="var(--color-border)" />
         <XAxis dataKey="name" tick={ax} angle={-28} textAnchor="end" interval={0} height={60} tickMargin={6} tickFormatter={fmtLabel} />
         <YAxis tick={ax} domain={[0, 110]} tickFormatter={(v) => `${v}%`} />
         <Tooltip contentStyle={ttStyle} labelStyle={ttLabel} itemStyle={ttItem} cursor={ttCursor} formatter={(v) => [`${v}%`, "Completion"]} />
@@ -227,11 +227,11 @@ export const CHART_DEFS: ChartDef[] = [
     buildData: (agg) => agg.map((r) => ({ name: r.name, "Last Week": r.lastWeekPending, Pending: r.pending })),
     renderChart: (data) => (
       <BarChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 44 }}>
-        <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.05)" />
+        <CartesianGrid vertical={false} stroke="var(--color-border)" />
         <XAxis dataKey="name" tick={ax} angle={-28} textAnchor="end" interval={0} height={60} tickMargin={6} tickFormatter={fmtLabel} />
         <YAxis tick={ax} />
         <Tooltip contentStyle={ttStyle} labelStyle={ttLabel} itemStyle={ttItem} cursor={ttCursor} />
-        <Legend wrapperStyle={{ fontSize: 10, color: "rgba(255,255,255,0.5)", paddingTop: 8 }} />
+        <Legend wrapperStyle={{ fontSize: 10, color: "#6B7280", paddingTop: 8 }} />
         <Bar dataKey="Last Week" fill={BLUE} radius={[4, 4, 0, 0]} maxBarSize={28} />
         <Bar dataKey="Pending" fill={RED} radius={[4, 4, 0, 0]} maxBarSize={28} />
       </BarChart>
@@ -255,11 +255,11 @@ export const CHART_DEFS: ChartDef[] = [
     })),
     renderChart: (data) => (
       <BarChart data={data} margin={{ top: 8, right: 8, left: -16, bottom: 44 }}>
-        <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.05)" />
+        <CartesianGrid vertical={false} stroke="var(--color-border)" />
         <XAxis dataKey="name" tick={ax} angle={-28} textAnchor="end" interval={0} height={60} tickMargin={6} tickFormatter={fmtLabel} />
         <YAxis tick={ax} />
         <Tooltip contentStyle={ttStyle} labelStyle={ttLabel} itemStyle={ttItem} cursor={ttCursor} />
-        <Legend wrapperStyle={{ fontSize: 10, color: "rgba(255,255,255,0.5)", paddingTop: 8 }} />
+        <Legend wrapperStyle={{ fontSize: 10, color: "#6B7280", paddingTop: 8 }} />
         <Bar dataKey="Last 4 Weeks" fill={BLUE} radius={[4, 4, 0, 0]} maxBarSize={20} />
         <Bar dataKey="Total Overall" fill={RED} radius={[4, 4, 0, 0]} maxBarSize={20} />
         <Bar dataKey="Overall Done" fill={YELLOW} radius={[4, 4, 0, 0]} maxBarSize={20} />
@@ -290,15 +290,19 @@ function DrillTable({
     : records;
 
   if (rows.length === 0)
-    return <p className="text-white/30 text-sm text-center py-6">No records for this selection.</p>;
+    return <p style={{ color: "var(--color-text-muted)", fontSize: "var(--text-sm)", textAlign: "center", padding: "var(--space-6) 0" }}>No records for this selection.</p>;
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-white/10">
-      <table className="w-full text-xs">
+    <div style={{ overflowX: "auto", borderRadius: "var(--radius-md)", border: "1px solid var(--color-border)" }}>
+      <table style={{ width: "100%", fontSize: "var(--text-xs)", borderCollapse: "collapse" }}>
         <thead>
-          <tr className="border-b border-white/10 bg-white/5">
+          <tr style={{ borderBottom: "1px solid var(--color-border)", background: "var(--color-surface)" }}>
             {columns.map((c) => (
-              <th key={c.key} className="px-3 py-2.5 text-left text-white/40 font-semibold uppercase tracking-wider whitespace-nowrap">
+              <th key={c.key} scope="col" style={{
+                padding: "var(--space-2) var(--space-3)", textAlign: "left",
+                color: "var(--color-text-muted)", fontWeight: "var(--font-semibold)",
+                textTransform: "uppercase", letterSpacing: "0.05em", whiteSpace: "nowrap",
+              }}>
                 {c.label}
               </th>
             ))}
@@ -306,9 +310,9 @@ function DrillTable({
         </thead>
         <tbody>
           {rows.map((r, i) => (
-            <tr key={r.id ?? i} className="border-b border-white/5 hover:bg-white/5 transition-colors">
+            <tr key={r.id ?? i} style={{ borderBottom: "1px solid var(--color-border)", background: i % 2 === 0 ? "transparent" : "var(--color-surface)" }}>
               {columns.map((c) => (
-                <td key={c.key} className="px-3 py-2 text-white/70 whitespace-nowrap">
+                <td key={c.key} style={{ padding: "var(--space-2) var(--space-3)", color: "var(--color-text-secondary)", whiteSpace: "nowrap" }}>
                   {String(r[c.key] ?? "—")}
                 </td>
               ))}
@@ -324,10 +328,10 @@ function DrillTable({
 function Section({ title, icon, color, children }: { title: string; icon: string; color: string; children: React.ReactNode }) {
   return (
     <div>
-      <div className="flex items-center gap-2 mb-3">
-        <i className={`${icon} text-sm`} style={{ color }} />
-        <h3 className="text-sm font-bold text-white/80">{title}</h3>
-        <div className="flex-1 h-px bg-white/10" />
+      <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", marginBottom: "var(--space-3)" }}>
+        <i className={`${icon}`} style={{ color, fontSize: "var(--text-sm)" }} />
+        <h3 style={{ margin: 0, fontSize: "var(--text-sm)", fontWeight: "var(--font-bold)", color: "var(--color-text-primary)" }}>{title}</h3>
+        <div style={{ flex: 1, height: 1, background: "var(--color-border)" }} />
       </div>
       {children}
     </div>
@@ -402,79 +406,94 @@ export default function ChartDrillDrawer({ chartId, records, onClose }: Props) {
         className="fixed top-0 right-0 h-full w-full max-w-2xl z-50 overflow-y-auto transition-transform duration-500 ease-in-out"
         style={{
           transform: isOpen ? "translateX(0)" : "translateX(100%)",
-          background: "#111111",
-          borderLeft: "1px solid rgba(255,255,255,0.08)",
-          boxShadow: "-20px 0 60px rgba(0,0,0,0.6)",
+          background: "var(--color-canvas)",
+          borderLeft: "1px solid var(--color-border)",
+          boxShadow: "-8px 0 32px rgba(0,0,0,0.12)",
         }}
       >
         {def && (
-          <div className="flex flex-col min-h-full">
+          <div style={{ display: "flex", flexDirection: "column", minHeight: "100%" }}>
 
             {/* Header */}
-            <div
-              className="relative overflow-hidden px-8 pt-8 pb-6 border-b border-white/10 shrink-0"
-              style={{ background: "linear-gradient(135deg, #1a0e2e 0%, #0f0f0f 100%)" }}
-            >
-              <div
-                className="absolute inset-0 opacity-[0.04]"
-                style={{ backgroundImage: "repeating-linear-gradient(45deg,#fff 0px,#fff 1px,transparent 1px,transparent 20px)" }}
-              />
+            <div style={{
+              position: "relative", overflow: "hidden",
+              padding: "var(--space-8) var(--space-8) var(--space-6)",
+              borderBottom: "1px solid var(--color-border)",
+              background: "var(--color-surface)", flexShrink: 0,
+            }}>
               <button
                 onClick={onClose}
-                className="absolute top-5 right-5 w-8 h-8 rounded-full flex items-center justify-center text-white/40 hover:text-white hover:bg-white/10 transition-all cursor-pointer"
+                aria-label="Close drawer"
+                style={{
+                  position: "absolute", top: "var(--space-4)", right: "var(--space-4)",
+                  width: 32, height: 32, borderRadius: "50%",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  border: "1px solid var(--color-border)", background: "transparent",
+                  color: "var(--color-text-muted)", cursor: "pointer",
+                }}
               >
-                <i className="ri-close-line text-lg" />
+                <i className="ri-close-line" style={{ fontSize: "var(--text-md)" }} />
               </button>
 
-              <div className="relative flex items-start gap-4">
-                <div
-                  className="w-14 h-14 rounded-2xl flex items-center justify-center shrink-0"
-                  style={{ background: "linear-gradient(135deg, #7c4daa 0%, #4d2a8a 100%)" }}
-                >
-                  <i className={`${def.icon} text-xl text-white`} />
+              <div style={{ display: "flex", alignItems: "flex-start", gap: "var(--space-4)" }}>
+                <div style={{
+                  width: 48, height: 48, borderRadius: "var(--radius-lg)",
+                  display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+                  background: "var(--color-accent-tint)", color: "var(--color-accent)",
+                }}>
+                  <i className={def.icon} style={{ fontSize: 20 }} />
                 </div>
                 <div>
-                  <div className="text-xs text-white/40 mb-0.5">Chart Drill-Down</div>
-                  <h2 className="text-xl font-black text-white leading-tight">{def.title}</h2>
-                  <p className="text-xs text-white/35 mt-1">{def.subtitle}</p>
+                  <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", marginBottom: 2 }}>Chart Drill-Down</div>
+                  <h2 style={{ margin: 0, fontSize: "var(--text-xl)", fontWeight: "var(--font-bold)", color: "var(--color-text-primary)", lineHeight: 1.2 }}>{def.title}</h2>
+                  <p style={{ margin: "var(--space-1) 0 0", fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>{def.subtitle}</p>
                 </div>
               </div>
 
               {/* summary pills */}
-              <div className="relative grid grid-cols-3 gap-3 mt-5">
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: "var(--space-3)", marginTop: "var(--space-5)" }}>
                 {[
-                  { label: "Case Owners", value: agg.length, color: "#c4b5fd" },
-                  { label: "Records", value: filteredRecords.length, color: "#a8f0c6" },
-                  { label: "Showing", value: drillRowCount, color: def.color },
+                  { label: "Case Owners", value: agg.length, color: "var(--color-accent)" },
+                  { label: "Records", value: filteredRecords.length, color: "var(--color-success)" },
+                  { label: "Showing", value: drillRowCount, color: "var(--color-text-primary)" },
                 ].map((s) => (
-                  <div key={s.label} className="rounded-xl p-3 border border-white/10 bg-white/5">
-                    <div className="text-xl font-black font-mono" style={{ color: s.color }}>{s.value}</div>
-                    <div className="text-xs text-white/40 mt-0.5">{s.label}</div>
+                  <div key={s.label} style={{
+                    borderRadius: "var(--radius-md)", padding: "var(--space-3)",
+                    border: "1px solid var(--color-border)", background: "var(--color-canvas)",
+                  }}>
+                    <div style={{ fontSize: "var(--text-xl)", fontWeight: "var(--font-bold)", color: s.color, fontVariantNumeric: "tabular-nums" }}>{s.value}</div>
+                    <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", marginTop: 2 }}>{s.label}</div>
                   </div>
                 ))}
               </div>
             </div>
 
             {/* Body */}
-            <div className="flex-1 px-8 py-6 space-y-6">
+            <div style={{ flex: 1, padding: "var(--space-6) var(--space-8)", display: "flex", flexDirection: "column", gap: "var(--space-6)" }}>
 
               {/* Search */}
-              <div className="relative">
-                <i className="ri-search-2-line absolute left-3 top-1/2 -translate-y-1/2 text-white/30 text-sm" />
+              <div style={{ position: "relative" }}>
+                <i className="ri-search-2-line" style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--color-text-muted)", fontSize: "var(--text-sm)" }} />
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   placeholder="Search associate, coach, case owner…"
-                  className="w-full bg-white/5 border border-white/10 rounded-lg pl-8 pr-3 py-2 text-sm text-white placeholder-white/25 focus:outline-none focus:border-[#7c4daa]/60 transition-colors"
+                  style={{
+                    width: "100%", boxSizing: "border-box",
+                    background: "var(--color-surface)", border: "1px solid var(--color-border)",
+                    borderRadius: "var(--radius-md)", paddingLeft: 32, paddingRight: 12,
+                    paddingTop: "var(--space-2)", paddingBottom: "var(--space-2)",
+                    fontSize: "var(--text-sm)", color: "var(--color-text-primary)", outline: "none",
+                  }}
                 />
               </div>
 
               {/* Chart */}
-              <Section title="Chart" icon={def.icon} color={def.color}>
-                <div
-                  className="rounded-2xl border border-white/10 p-4"
-                  style={{ background: "rgba(255,255,255,0.04)" }}
-                >
+              <Section title="Chart" icon={def.icon} color="var(--color-accent)">
+                <div style={{
+                  borderRadius: "var(--radius-lg)", border: "1px solid var(--color-border)",
+                  padding: "var(--space-4)", background: "var(--color-surface)",
+                }}>
                   <ResponsiveContainer width="100%" height={260}>
                     {/* @ts-expect-error — recharts internal child cloning */}
                     {def.renderChart(chartData)}
@@ -484,15 +503,17 @@ export default function ChartDrillDrawer({ chartId, records, onClose }: Props) {
 
               {/* Owner filter pills */}
               {agg.length > 0 && (
-                <Section title="Filter by Case Owner" icon="ri-user-line" color="#c4b5fd">
-                  <div className="flex flex-wrap gap-2">
+                <Section title="Filter by Case Owner" icon="ri-user-line" color="var(--color-accent)">
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "var(--space-2)" }}>
                     <button
                       onClick={() => setSelectedOwner(null)}
-                      className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
-                        selectedOwner === null
-                          ? "bg-[#7c4daa] border-[#7c4daa] text-white"
-                          : "bg-white/5 border-white/15 text-white/50 hover:text-white"
-                      }`}
+                      style={{
+                        padding: "var(--space-1) var(--space-3)", borderRadius: 999,
+                        fontSize: "var(--text-xs)", fontWeight: "var(--font-medium)", cursor: "pointer",
+                        border: `1px solid ${selectedOwner === null ? "var(--color-accent)" : "var(--color-border)"}`,
+                        background: selectedOwner === null ? "var(--color-accent)" : "transparent",
+                        color: selectedOwner === null ? "#ffffff" : "var(--color-text-secondary)",
+                      }}
                     >
                       All
                     </button>
@@ -500,11 +521,13 @@ export default function ChartDrillDrawer({ chartId, records, onClose }: Props) {
                       <button
                         key={a.name}
                         onClick={() => setSelectedOwner(selectedOwner === a.name ? null : a.name)}
-                        className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
-                          selectedOwner === a.name
-                            ? "bg-[#7c4daa] border-[#7c4daa] text-white"
-                            : "bg-white/5 border-white/15 text-white/50 hover:text-white"
-                        }`}
+                        style={{
+                          padding: "var(--space-1) var(--space-3)", borderRadius: 999,
+                          fontSize: "var(--text-xs)", fontWeight: "var(--font-medium)", cursor: "pointer",
+                          border: `1px solid ${selectedOwner === a.name ? "var(--color-accent)" : "var(--color-border)"}`,
+                          background: selectedOwner === a.name ? "var(--color-accent)" : "transparent",
+                          color: selectedOwner === a.name ? "#ffffff" : "var(--color-text-secondary)",
+                        }}
                       >
                         {a.name}
                       </button>
@@ -514,11 +537,11 @@ export default function ChartDrillDrawer({ chartId, records, onClose }: Props) {
               )}
 
               {/* Detail table */}
-              <Section title={`Detail Records${selectedOwner ? ` — ${selectedOwner}` : ""}`} icon="ri-table-line" color="#a8f0c6">
+              <Section title={`Detail Records${selectedOwner ? ` — ${selectedOwner}` : ""}`} icon="ri-table-line" color="var(--color-success)">
                 <DrillTable records={filteredRecords} columns={def.drillColumns} filterOwner={selectedOwner} />
               </Section>
 
-              <div className="pb-8" />
+              <div style={{ paddingBottom: "var(--space-8)" }} />
             </div>
           </div>
         )}

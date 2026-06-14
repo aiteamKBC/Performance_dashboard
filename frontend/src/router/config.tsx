@@ -1,26 +1,25 @@
 import type { RouteObject } from "react-router-dom";
 import NotFound from "../pages/NotFound";
-import LandingPage from "../pages/landing/page";
 import Home from "../pages/home/page";
+import CoachDetailPage from "../pages/home/CoachDetailPage";
 import CoachSummaryPage from "../pages/coachSummary/page";
-import TestKPIsPage from "../pages/testKPIs/page";
 
 const routes: RouteObject[] = [
   {
     path: "/",
-    element: <LandingPage />,
+    element: <Home />,
   },
   {
     path: "/dashboard",
     element: <Home />,
   },
   {
-    path: "/coach-summary",
-    element: <CoachSummaryPage />,
+    path: "/coach/:id",
+    element: <CoachDetailPage />,
   },
   {
-    path: "/test-kpis",
-    element: <TestKPIsPage />,
+    path: "/coach-summary",
+    element: <CoachSummaryPage />,
   },
   {
     path: "*",

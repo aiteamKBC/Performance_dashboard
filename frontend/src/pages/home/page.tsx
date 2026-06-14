@@ -1,20 +1,23 @@
 import { useMemo, useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import type { CoachRecord } from "@/mocks/dashboard";
 import { fetchCoachesLateness } from "@/services/coachesLateness";
-import DashboardHeader from "./components/DashboardHeader";
+import { TopbarLeft, TopbarRight } from "./components/DashboardHeader";
 import ChartsSection from "./components/ChartsSection";
+import CoachCards from "./components/CoachCards";
 import MasterTable from "./components/MasterTable";
-import ChartDrillDrawer from "./components/ChartDrillDrawer";
+import CoachDrillDrawer from "./components/CoachDrillDrawer";
+import AppShell from "@/components/AppShell";
 
 export default function Home() {
+  const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCoach, setActiveCoach] = useState("All");
-  const [drillChartId, setDrillChartId] = useState<string | null>(null);
+  const [drillCoach, setDrillCoach] = useState<CoachRecord | null>(null);
   const [coachRecords, setCoachRecords] = useState<CoachRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch real data from API on mount
   useEffect(() => {
     const loadData = async () => {
       try {
@@ -29,7 +32,6 @@ export default function Home() {
         setLoading(false);
       }
     };
-
     loadData();
   }, []);
 
@@ -51,35 +53,17 @@ export default function Home() {
     });
   }, [searchQuery, activeCoach, coachRecords]);
 
-  // Quick summary numbers from filtered set
-  const totalLearners = filtered.reduce((s, r) => s + r.totalLearners, 0);
-  const avgEngagement = filtered.length
-    ? Math.round(filtered.reduce((s, r) => s + r.learnerEngagement, 0) / filtered.length)
-    : 0;
-  const totalPending = filtered.reduce((s, r) => s + r.pending, 0);
-  const atRisk = filtered.reduce((s, r) => s + r.otjhAtRisk, 0);
-  const coachesShown = new Set(filtered.map((r) => r.coach)).size;
-
-  const headerTotalLearners = coachRecords.reduce((s, r) => s + r.totalLearners, 0);
-  const headerAvgEngagement = coachRecords.length
-    ? Math.round(coachRecords.reduce((s, r) => s + r.learnerEngagement, 0) / coachRecords.length)
-    : 0;
-  const headerTotalPending = coachRecords.reduce((s, r) => s + r.pending, 0);
-
   const getLatestSnapshotDate = (rows: CoachRecord[]) => {
     const normalizedDates = rows
       .map((r) => r.lastSnapshotDate)
       .map((value) => {
         const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
         if (isoMatch) return isoMatch[0];
-
         const slashMatch = value.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
         if (slashMatch) return `${slashMatch[3]}-${slashMatch[2]}-${slashMatch[1]}`;
-
         return "";
       })
       .filter(Boolean);
-
     if (normalizedDates.length === 0) return "";
     return normalizedDates.reduce((latest, current) => (current > latest ? current : latest));
   };
@@ -89,74 +73,84 @@ export default function Home() {
   }, [filtered, coachRecords]);
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] font-sans">
-      {/* Loading indicator */}
+    <>
+      {/* Loading overlay */}
       {loading && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-[#1a1a1a] rounded-lg p-8 flex flex-col items-center gap-4">
-            <i className="ri-loader-4-line text-4xl text-[#7c4daa] animate-spin" />
-            <span className="text-white text-sm">Loading coaches data...</span>
+        <div style={{
+          position: "fixed", inset: 0,
+          background: "rgba(247,248,250,0.85)",
+          display: "flex", alignItems: "center", justifyContent: "center",
+          zIndex: 50,
+        }}>
+          <div style={{
+            background: "var(--color-surface)", border: "1px solid var(--color-border)",
+            borderRadius: "var(--radius-lg)", padding: "var(--space-8)",
+            display: "flex", flexDirection: "column", alignItems: "center", gap: "var(--space-4)",
+            boxShadow: "var(--shadow-raised)",
+          }}>
+            <i className="ri-loader-4-line" style={{ fontSize: 36, color: "var(--color-accent)", animation: "spin 1s linear infinite" }} aria-hidden="true" />
+            <span style={{ color: "var(--color-text-secondary)", fontSize: "var(--text-sm)" }}>Loading coaches data…</span>
           </div>
         </div>
       )}
 
       {/* Error notification */}
       {error && (
-        <div className="fixed top-4 right-4 bg-red-900/90 border border-red-500 text-white px-4 py-3 rounded-lg shadow-lg z-50 flex items-center gap-2">
-          <i className="ri-error-warning-line text-xl" />
-          <span className="text-sm">{error}</span>
+        <div role="alert" style={{
+          position: "fixed", top: "var(--space-4)", right: "var(--space-4)",
+          background: "var(--color-danger-bg)", border: "1px solid var(--color-danger)",
+          color: "var(--color-danger)", padding: "var(--space-3) var(--space-4)",
+          borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-raised)",
+          zIndex: 50, display: "flex", alignItems: "center", gap: "var(--space-2)",
+        }}>
+          <i className="ri-error-warning-line" style={{ fontSize: 18 }} aria-hidden="true" />
+          <span style={{ fontSize: "var(--text-sm)" }}>{error}</span>
         </div>
       )}
 
-      <DashboardHeader
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
-        activeCoach={activeCoach}
-        onCoachChange={setActiveCoach}
-        coaches={coaches}
-        liveSnapshotDate={liveSnapshotDate}
-        headlineStats={{
-          totalLearners: headerTotalLearners,
-          avgEngagement: headerAvgEngagement,
-          totalPending: headerTotalPending,
-        }}
-      />
-
-      {/* Quick stat strip */}
-      <div className="border-b border-white/5 bg-[#0f0f0f]">
-        <div className="max-w-[1600px] mx-auto px-8 py-3 flex items-center gap-8 overflow-x-auto">
-          {[
-            { label: "Associates shown", value: filtered.length, icon: "ri-user-3-line", colorClass: "text-[#c4b5fd]" },
-            { label: "Total Learners", value: totalLearners, icon: "ri-group-line", colorClass: "text-[#a8f0c6]" },
-            { label: "Avg Engagement", value: `${avgEngagement}%`, icon: "ri-pulse-line", colorClass: "text-[#a8f0c6]" },
-            { label: "Total Pending", value: totalPending, icon: "ri-hourglass-2-line", colorClass: "text-[#7c4daa]" },
-            { label: "OTJH At Risk", value: atRisk, icon: "ri-alarm-warning-line", colorClass: "text-[#ff7a7a]" },
-            { label: "Coaches", value: coachesShown, icon: "ri-shield-user-line", colorClass: "text-[#c4b5fd]" },
-          ].map((s) => (
-            <div key={s.label} className="flex items-center gap-2 shrink-0">
-              <div className="w-6 h-6 flex items-center justify-center">
-                <i className={`${s.icon} text-sm ${s.colorClass}`} />
-              </div>
-              <span className={`font-bold text-sm font-mono ${s.colorClass}`}>{s.value}</span>
-              <span className="text-white/30 text-xs whitespace-nowrap">{s.label}</span>
+      <AppShell
+        topbarLeft={<TopbarLeft liveSnapshotDate={liveSnapshotDate} />}
+        topbarRight={
+          <TopbarRight
+            searchQuery={searchQuery}
+            onSearchChange={setSearchQuery}
+            activeCoach={activeCoach}
+            onCoachChange={setActiveCoach}
+            coaches={coaches}
+          />
+        }
+      >
+        <div className="page-layout">
+          {/* Page heading row */}
+          <div className="page-heading-row">
+            <div>
+              <h2 style={{ margin: 0, color: "var(--color-text-primary)" }}>Coaches Performance</h2>
+              <p style={{ margin: "var(--space-1) 0 0", color: "var(--color-text-secondary)", fontSize: "var(--text-sm)" }}>
+                Coaching cohort metrics, evidence pipeline, and learner risk signals
+              </p>
             </div>
-          ))}
+          </div>
+
+          {/* Coach cards — click to open the coach detail page */}
+          <CoachCards records={filtered} onSelect={(r) => navigate(`/coach/${r.id}`)} />
+
+          {/* Chart row */}
+          <ChartsSection records={filtered} />
+
+          {/* Full-width data table */}
+          <MasterTable records={filtered} onRowClick={setDrillCoach} />
         </div>
-      </div>
+      </AppShell>
 
-      {/* Main content */}
-      <main className="px-8 py-6 max-w-[1600px] mx-auto space-y-6">
-        <ChartsSection records={filtered} onDrill={setDrillChartId} />
-        <MasterTable records={filtered} />
-
-
-      </main>
-
-      <ChartDrillDrawer
-        chartId={drillChartId}
-        records={filtered}
-        onClose={() => setDrillChartId(null)}
+      <CoachDrillDrawer
+        coach={drillCoach?.coach ?? null}
+        caseOwnerId={drillCoach?.caseOwnerId ?? null}
+        onClose={() => setDrillCoach(null)}
       />
-    </div>
+
+      <style>{`
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      `}</style>
+    </>
   );
 }

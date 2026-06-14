@@ -20,9 +20,10 @@ export default function OtjhRiskPanel({ records }: OtjhRiskPanelProps) {
       sublabel: "OTJH < 10%",
       value: totalOnTrack,
       pct: onTrackPct,
-      color: "#a8f0c6",
-      bg: "bg-[#a8f0c6]/10",
-      border: "border-[#a8f0c6]/30",
+      statusClass: "kpi-status--success",
+      bgColor: "var(--color-success-bg)",
+      fgColor: "var(--color-success)",
+      borderColor: "var(--color-success)",
       icon: "ri-checkbox-circle-line",
       desc: "Learners progressing at expected pace.",
     },
@@ -31,9 +32,10 @@ export default function OtjhRiskPanel({ records }: OtjhRiskPanelProps) {
       sublabel: "OTJH 11–25%",
       value: totalNeedAttention,
       pct: needPct,
-      color: "#7c4daa",
-      bg: "bg-[#7c4daa]/10",
-      border: "border-[#7c4daa]/30",
+      statusClass: "kpi-status--warning",
+      bgColor: "var(--color-warning-bg)",
+      fgColor: "var(--color-warning)",
+      borderColor: "var(--color-warning)",
       icon: "ri-error-warning-line",
       desc: "Require coaching check-in this week.",
     },
@@ -42,51 +44,57 @@ export default function OtjhRiskPanel({ records }: OtjhRiskPanelProps) {
       sublabel: "OTJH > 25%",
       value: totalAtRisk,
       pct: riskPct,
-      color: "#ff7a7a",
-      bg: "bg-[#ff7a7a]/10",
-      border: "border-[#ff7a7a]/30",
+      statusClass: "kpi-status--danger",
+      bgColor: "var(--color-danger-bg)",
+      fgColor: "var(--color-danger)",
+      borderColor: "var(--color-danger)",
       icon: "ri-alarm-warning-line",
       desc: "Immediate intervention recommended.",
     },
   ];
 
   return (
-    <div className="bg-[#141414] rounded-2xl p-6 border border-white/8">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <div className="text-xs text-white/30 uppercase tracking-widest mb-1">OTJ Hours</div>
-          <h2 className="text-white font-bold text-lg">Risk Distribution</h2>
-        </div>
-        <div className="text-xs text-white/30">{total} learners tracked</div>
+    <div className="kpi-card" style={{ gap: "var(--space-4)" }}>
+      <div className="kpi-header">
+        <span className="kpi-label">OTJ Hours Risk Distribution</span>
+        <span className="kpi-info" title="On-the-job hours risk breakdown">{total} learners</span>
       </div>
 
-      {/* Stacked bar */}
-      <div className="flex h-2.5 rounded-full overflow-hidden gap-0.5 mb-6">
-        <div className="rounded-l-full transition-all" style={{ width: `${onTrackPct}%`, background: "#a8f0c6" }} />
-        <div className="transition-all" style={{ width: `${needPct}%`, background: "#7c4daa" }} />
-        <div className="rounded-r-full transition-all" style={{ width: `${riskPct}%`, background: "#ff7a7a" }} />
+      {/* Stacked progress bar */}
+      <div style={{ display: "flex", height: 8, borderRadius: 999, overflow: "hidden", gap: 2 }}>
+        <div style={{ width: `${onTrackPct}%`, background: "var(--color-success)", borderRadius: "999px 0 0 999px" }} />
+        <div style={{ width: `${needPct}%`, background: "var(--color-warning)" }} />
+        <div style={{ width: `${riskPct}%`, background: "var(--color-danger)", borderRadius: "0 999px 999px 0" }} />
       </div>
 
       {/* Tier cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
+        gap: "var(--space-3)",
+      }}>
         {tiers.map((t) => (
           <div
             key={t.label}
-            className={`rounded-xl border ${t.bg} ${t.border} p-4 flex flex-col gap-2`}
+            style={{
+              background: t.bgColor,
+              border: `1px solid var(--color-border)`,
+              borderLeft: `3px solid ${t.fgColor}`,
+              borderRadius: "var(--radius-md)",
+              padding: "var(--space-4)",
+              display: "flex", flexDirection: "column", gap: "var(--space-2)",
+            }}
           >
-            <div className="flex items-center justify-between">
-              <div className="w-7 h-7 flex items-center justify-center">
-                <i className={`${t.icon} text-lg`} style={{ color: t.color }}></i>
-              </div>
-              <span className="text-xs font-mono" style={{ color: t.color }}>{t.pct}%</span>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <i className={t.icon} style={{ color: t.fgColor, fontSize: 16 }} aria-hidden="true" />
+              <span className={`kpi-status ${t.statusClass}`}>{t.pct}%</span>
             </div>
+            <div className="kpi-value" style={{ fontSize: "var(--text-xl)" }}>{t.value}</div>
             <div>
-              <div className="text-white font-bold text-2xl">{t.value}</div>
-              <div className="text-white/70 text-sm font-medium">{t.label}</div>
-              <div className="text-white/30 text-xs">{t.sublabel}</div>
+              <div style={{ fontWeight: "var(--font-semibold)", color: t.fgColor, fontSize: "var(--text-sm)" }}>{t.label}</div>
+              <div style={{ color: "var(--color-text-muted)", fontSize: "var(--text-xs)" }}>{t.sublabel}</div>
             </div>
-            <div className="text-white/40 text-xs leading-relaxed mt-1">{t.desc}</div>
+            <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", lineHeight: "var(--leading-snug)" }}>{t.desc}</div>
           </div>
         ))}
       </div>

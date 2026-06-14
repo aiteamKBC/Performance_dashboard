@@ -6,7 +6,6 @@ import { CoachRecord } from "@/mocks/dashboard";
 
 interface ChartsSectionProps {
   records: CoachRecord[];
-  onDrill: (chartId: string) => void;
 }
 
 interface CaseOwnerAggregate {
@@ -23,28 +22,33 @@ interface CaseOwnerAggregate {
   prDoneOld4Weeks: number;
   prOverallRequired: number;
   prOverallCompleted: number;
+  mcmRequired12Weeks: number;
+  mcmCompleted12Weeks: number;
   otjhOnTrack: number;
   otjhNormal: number;
   otjhNeedAttention: number;
   otjhAtRisk: number;
 }
 
-const BLUE = "var(--home-chart-blue)";
-const RED = "var(--home-chart-red)";
-const YELLOW = "var(--home-chart-yellow)";
-const PURPLE = "var(--home-chart-purple)";
+/* Token palette for chart series */
+const C1 = "#4F46E5";
+const C2 = "#0891B2";
+const C3 = "#D97706";
+const C4 = "#16A34A";
+const C5 = "#DC2626";
 
 const tooltipStyle = {
-  backgroundColor: "#1e1e2e",
-  border: "1px solid rgba(255,255,255,0.15)",
-  borderRadius: "8px",
-  color: "#ffffff",
-  fontSize: "11px",
+  backgroundColor: "#ffffff",
+  border: "1px solid #E5E7EB",
+  borderRadius: 8,
+  color: "#111827",
+  fontSize: 11,
+  boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
 };
-const tooltipLabelStyle = { color: "#ffffff", fontWeight: 600 };
-const tooltipItemStyle = { color: "#d1d5db" };
-const cursorStyle = { fill: "rgba(255,255,255,0.04)" };
-const axisStyle = { fontSize: 11, fill: "rgba(255,255,255,0.6)" };
+const tooltipLabelStyle = { color: "#111827", fontWeight: 600 };
+const tooltipItemStyle = { color: "#6B7280" };
+const cursorStyle = { fill: "#EEF2FF" };
+const axisStyle = { fontSize: 11, fill: "#9CA3AF" };
 
 const formatCaseOwnerLabel = (value: string | number) => {
   const name = String(value ?? "").trim();
@@ -54,30 +58,22 @@ const formatCaseOwnerLabel = (value: string | number) => {
   return `${parts[0]} ${parts[1][0]}.`;
 };
 
-function ChartCard({ title, subtitle, drillId, onDrill, children }: { title: string; subtitle?: string; drillId?: string; onDrill?: (id: string) => void; children: React.ReactNode }) {
+function ChartCard({
+  title, subtitle, children,
+}: {
+  title: string; subtitle?: string; children: React.ReactNode;
+}) {
   return (
-    <div
-      onClick={() => drillId && onDrill?.(drillId)}
-      className={`rounded-2xl border border-white/15 p-5 flex flex-col gap-3 overflow-hidden isolate transition-colors ${drillId ? "cursor-pointer hover:border-[#7c4daa]/50 hover:bg-white/[0.02]" : ""}`}
-      style={{
-        background: "linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.035) 100%), rgba(18,18,22,0.92)",
-        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.10), 0 8px 32px rgba(0,0,0,0.35)",
-        transform: "translateZ(0)",
-        willChange: "transform",
-      }}
-    >
-      <div className="flex items-start justify-between gap-2">
+    <div className="chart-card">
+      <div className="chart-header">
         <div>
-          <p className="text-[10px] uppercase tracking-widest text-white/25 mb-0.5">{subtitle ?? "CaseOwner"}</p>
-          <h3 className="text-white font-bold text-sm leading-tight">{title}</h3>
+          <h3 className="chart-title">{title}</h3>
+          {subtitle && <p className="chart-subtitle">{subtitle}</p>}
         </div>
-        {drillId && (
-          <span className="shrink-0 flex items-center gap-1 text-[10px] text-white/25 mt-0.5">
-            <i className="ri-zoom-in-line text-xs" /> Drill
-          </span>
-        )}
       </div>
-      {children}
+      <div className="chart-body">
+        {children}
+      </div>
     </div>
   );
 }
@@ -87,31 +83,17 @@ const toPercent = (numerator: number, denominator: number) => {
   return Math.round((numerator / denominator) * 1000) / 10;
 };
 
-const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
-
 function aggregateByCaseOwner(records: CoachRecord[]): CaseOwnerAggregate[] {
   const grouped = records.reduce((map, r) => {
     const name = (r.caseOwner || r.coach || r.associate || "Unknown").trim() || "Unknown";
     const current = map.get(name) ?? {
-      name,
-      totalLearners: 0,
-      recentSubmitters: 0,
-      evidenceAccepted: 0,
-      evidenceReferred: 0,
-      referredClosure: 0,
-      lastWeekPending: 0,
-      pending: 0,
-      prRequired4Weeks: 0,
-      prCompleted4Weeks: 0,
-      prDoneOld4Weeks: 0,
-      prOverallRequired: 0,
-      prOverallCompleted: 0,
-      otjhOnTrack: 0,
-      otjhNormal: 0,
-      otjhNeedAttention: 0,
-      otjhAtRisk: 0,
+      name, totalLearners: 0, recentSubmitters: 0, evidenceAccepted: 0,
+      evidenceReferred: 0, referredClosure: 0, lastWeekPending: 0, pending: 0,
+      prRequired4Weeks: 0, prCompleted4Weeks: 0, prDoneOld4Weeks: 0,
+      prOverallRequired: 0, prOverallCompleted: 0,
+      mcmRequired12Weeks: 0, mcmCompleted12Weeks: 0,
+      otjhOnTrack: 0, otjhNormal: 0, otjhNeedAttention: 0, otjhAtRisk: 0,
     };
-
     current.totalLearners += r.totalLearners;
     current.recentSubmitters += r.recentSubmitters;
     current.evidenceAccepted += r.evidenceAccepted;
@@ -124,23 +106,27 @@ function aggregateByCaseOwner(records: CoachRecord[]): CaseOwnerAggregate[] {
     current.prDoneOld4Weeks += r.prDoneOld4Weeks ?? r.prCompleted4Weeks;
     current.prOverallRequired += r.prOverallRequired;
     current.prOverallCompleted += r.prOverallCompleted;
+    current.mcmRequired12Weeks += r.mcmRequired12Weeks ?? 0;
+    current.mcmCompleted12Weeks += r.mcmCompleted12Weeks ?? 0;
     current.otjhOnTrack += r.otjhOnTrack;
     current.otjhNormal += r.otjhNormal ?? 0;
     current.otjhNeedAttention += r.otjhNeedAttention;
     current.otjhAtRisk += r.otjhAtRisk;
-
     map.set(name, current);
     return map;
   }, new Map<string, CaseOwnerAggregate>());
-
   return Array.from(grouped.values());
 }
 
-export default function ChartsSection({ records, onDrill }: ChartsSectionProps) {
+export default function ChartsSection({ records }: ChartsSectionProps) {
   if (records.length === 0) {
     return (
-      <div className="rounded-2xl border border-white/15 p-8 text-center text-white/30 text-sm" style={{ background: "rgba(255,255,255,0.05)", backdropFilter: "blur(24px)", WebkitBackdropFilter: "blur(24px)" }}>
-        No data to display. Adjust your filters.
+      <div className="chart-card">
+        <div className="empty-state" style={{ padding: "var(--space-8)" }}>
+          <span className="empty-state-icon">📊</span>
+          <p className="empty-state-title">No data to display</p>
+          <p className="empty-state-body">Adjust your filters to see chart data.</p>
+        </div>
       </div>
     );
   }
@@ -157,17 +143,6 @@ export default function ChartsSection({ records, onDrill }: ChartsSectionProps) 
     ReferredClosure: r.referredClosure,
   }));
 
-  const markingData = grouped.map((r) => {
-    const rawChangePct = r.lastWeekPending > 0
-      ? ((r.lastWeekPending - r.pending) / r.lastWeekPending) * 100
-      : (r.pending > 0 ? -100 : 0);
-
-    return {
-      name: r.name,
-      Marking: Math.round(clamp(rawChangePct, -100, 100) * 10) / 10,
-    };
-  });
-
   const overallPrData = grouped.map((r) => ({
     name: r.name,
     "Completion%": toPercent(r.prOverallCompleted, r.prOverallRequired),
@@ -179,11 +154,6 @@ export default function ChartsSection({ records, onDrill }: ChartsSectionProps) 
     Pending: r.pending,
   }));
 
-  const pr4WeeksData = grouped.map((r) => ({
-    name: r.name,
-    "4Wk Rate": toPercent(r.prCompleted4Weeks, r.prRequired4Weeks),
-  }));
-
   const otjhData = grouped.map((r) => ({
     name: r.name,
     OnTrack: r.otjhOnTrack,
@@ -193,126 +163,139 @@ export default function ChartsSection({ records, onDrill }: ChartsSectionProps) 
 
   const prPerfData = grouped.map((r) => ({
     name: r.name,
-    "Last 4 Weeks": r.prDoneOld4Weeks,
-    "Total Overall (PR)": r.prOverallRequired,
-    "Overall Completed": r.prOverallCompleted,
+    Required: r.prOverallRequired,
+    Completed: r.prOverallCompleted,
+    Behind: Math.max(r.prOverallRequired - r.prOverallCompleted, 0),
+  }));
+
+  const mcmPerfData = grouped.map((r) => ({
+    name: r.name,
+    Required: r.mcmRequired12Weeks,
+    Completed: r.mcmCompleted12Weeks,
+    Behind: Math.max(r.mcmRequired12Weeks - r.mcmCompleted12Weeks, 0),
   }));
 
   return (
-    <div className="home-analytics-charts space-y-4">
-      <div className="flex items-center gap-3">
-        <div className="h-px flex-1 bg-white/8" />
-        <span className="text-[10px] uppercase tracking-widest text-white/25 px-2">Analytics Charts</span>
-        <div className="h-px flex-1 bg-white/8" />
+    <div className="home-analytics-charts" style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+        <div style={{ height: 1, flex: 1, background: "var(--color-border)" }} />
+        <span style={{ fontSize: "var(--text-xs)", textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)", padding: "0 var(--space-2)" }}>Analytics Charts</span>
+        <div style={{ height: 1, flex: 1, background: "var(--color-border)" }} />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <ChartCard title="Learner Engagement vs. CaseOwner" subtitle="CaseOwner" drillId="engagement" onDrill={onDrill}>
+      <div className="chart-grid">
+        <ChartCard
+          title="Engagement varies significantly across case owners"
+          subtitle="Learner engagement % by case owner"
+        >
           <ResponsiveContainer width="100%" height={160}>
-            <BarChart data={engagementData} margin={{ top: 4, right: 8, left: -20, bottom: 30 }}>
-              <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.05)" />
-              <XAxis dataKey="name" tick={axisStyle} angle={-28} textAnchor="end" interval={0} height={56} tickMargin={6} tickFormatter={formatCaseOwnerLabel} />
+            <BarChart data={engagementData} margin={{ top: 4, right: 8, left: -20, bottom: 36 }}>
+              <CartesianGrid vertical={false} stroke="var(--color-border)" />
+              <XAxis dataKey="name" tick={axisStyle} angle={-28} textAnchor="end" interval={0} height={44} tickMargin={6} tickFormatter={formatCaseOwnerLabel} />
               <YAxis tick={axisStyle} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
-              <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={cursorStyle} formatter={(v) => [`${v}%`, "Learner"]} />
-              <Bar dataKey="Engagement" fill={BLUE} radius={[3, 3, 0, 0]} maxBarSize={28} />
+              <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={cursorStyle} formatter={(v) => [`${v}%`, "Learner Engagement"]} />
+              <Bar dataKey="Engagement" fill={C1} radius={[3, 3, 0, 0]} maxBarSize={28} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Referred Closure vs. CaseOwner" subtitle="CaseOwner" drillId="closure" onDrill={onDrill}>
+        <ChartCard
+          title="Referred closure count per case owner"
+          subtitle="Total referred closures"
+        >
           <ResponsiveContainer width="100%" height={160}>
-            <BarChart data={closureData} margin={{ top: 4, right: 8, left: -20, bottom: 30 }}>
-              <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.05)" />
-              <XAxis dataKey="name" tick={axisStyle} angle={-28} textAnchor="end" interval={0} height={56} tickMargin={6} tickFormatter={formatCaseOwnerLabel} />
+            <BarChart data={closureData} margin={{ top: 4, right: 8, left: -20, bottom: 36 }}>
+              <CartesianGrid vertical={false} stroke="var(--color-border)" />
+              <XAxis dataKey="name" tick={axisStyle} angle={-28} textAnchor="end" interval={0} height={44} tickMargin={6} tickFormatter={formatCaseOwnerLabel} />
               <YAxis tick={axisStyle} allowDecimals={false} />
               <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={cursorStyle} formatter={(v) => [v, "Referred Closure"]} />
-              <Bar dataKey="ReferredClosure" fill={BLUE} radius={[3, 3, 0, 0]} maxBarSize={28} />
+              <Bar dataKey="ReferredClosure" fill={C2} radius={[3, 3, 0, 0]} maxBarSize={28} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Marking Progress Weekly" subtitle="week over week (%)" drillId="marking" onDrill={onDrill}>
+        <ChartCard
+          title="OTJH risk spread — check for high 'Need Attention' volumes"
+          subtitle="On-track / Normal / Need Attention by case owner"
+        >
           <ResponsiveContainer width="100%" height={160}>
-            <BarChart data={markingData} margin={{ top: 4, right: 8, left: -20, bottom: 30 }}>
-              <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.05)" />
-              <XAxis dataKey="name" tick={axisStyle} angle={-28} textAnchor="end" interval={0} height={56} tickMargin={6} tickFormatter={formatCaseOwnerLabel} />
-              <YAxis tick={axisStyle} domain={[-100, 100]} tickFormatter={(v) => `${v}%`} />
-              <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={cursorStyle} formatter={(v) => [`${v}%`, "Marking"]} />
-              <Bar dataKey="Marking" fill={BLUE} radius={[3, 3, 0, 0]} maxBarSize={28} />
+            <BarChart data={otjhData} margin={{ top: 4, right: 8, left: -20, bottom: 36 }}>
+              <CartesianGrid vertical={false} stroke="var(--color-border)" />
+              <XAxis dataKey="name" tick={axisStyle} angle={-20} textAnchor="end" interval={0} height={44} tickMargin={6} tickFormatter={formatCaseOwnerLabel} />
+              <YAxis tick={axisStyle} />
+              <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={cursorStyle} />
+              <Legend wrapperStyle={{ fontSize: 10, color: "var(--color-text-secondary)", paddingTop: 8 }} />
+              <Bar dataKey="OnTrack" stackId="a" fill={C4} maxBarSize={36} />
+              <Bar dataKey="Normal" stackId="a" fill={C3} maxBarSize={36} />
+              <Bar dataKey="Need Attention" stackId="a" fill={C5} radius={[3, 3, 0, 0]} maxBarSize={36} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
-      </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="md:col-span-2">
-          <ChartCard title="OTJH Status" subtitle="Need Attention / Normal / OnTrack" drillId="otjh" onDrill={onDrill}>
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={otjhData} margin={{ top: 4, right: 8, left: -20, bottom: 30 }}>
-                <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.05)" />
-                <XAxis dataKey="name" tick={axisStyle} angle={-20} textAnchor="end" interval={0} height={56} tickMargin={6} tickFormatter={formatCaseOwnerLabel} />
-                <YAxis tick={axisStyle} />
-                <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={cursorStyle} />
-                <Legend wrapperStyle={{ fontSize: 10, color: "rgba(255,255,255,0.5)", paddingTop: 8 }} />
-                <Bar dataKey="OnTrack" stackId="a" fill="#22c55e" maxBarSize={36} />
-                <Bar dataKey="Normal" stackId="a" fill="#f59e0b" maxBarSize={36} />
-                <Bar dataKey="Need Attention" stackId="a" fill="#ef4444" radius={[3, 3, 0, 0]} maxBarSize={36} />
-              </BarChart>
-            </ResponsiveContainer>
-          </ChartCard>
-        </div>
-
-        <ChartCard title="Completion Rate (PR) for Last 4 Weeks" subtitle="CaseOwner" drillId="pr4weeks" onDrill={onDrill}>
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={pr4WeeksData} margin={{ top: 4, right: 8, left: -20, bottom: 30 }}>
-              <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.05)" />
-              <XAxis dataKey="name" tick={axisStyle} angle={-28} textAnchor="end" interval={0} height={56} tickMargin={6} tickFormatter={formatCaseOwnerLabel} />
-              <YAxis tick={axisStyle} domain={[0, 110]} tickFormatter={(v) => `${v}%`} />
-              <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={cursorStyle} formatter={(v) => [`${v}%`, "4Wk Rate"]} />
-              <Bar dataKey="4Wk Rate" fill={BLUE} radius={[3, 3, 0, 0]} maxBarSize={28} />
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartCard>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <ChartCard title="Overall Completion(PR)" subtitle="CaseOwner" drillId="overall-pr" onDrill={onDrill}>
-          <ResponsiveContainer width="100%" height={180}>
-            <BarChart data={overallPrData} margin={{ top: 4, right: 8, left: -20, bottom: 30 }}>
-              <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.05)" />
-              <XAxis dataKey="name" tick={axisStyle} angle={-28} textAnchor="end" interval={0} height={56} tickMargin={6} tickFormatter={formatCaseOwnerLabel} />
+        <ChartCard
+          title="Overall PR completion rate per case owner"
+          subtitle="All-time % completed vs required"
+        >
+          <ResponsiveContainer width="100%" height={160}>
+            <BarChart data={overallPrData} margin={{ top: 4, right: 8, left: -20, bottom: 36 }}>
+              <CartesianGrid vertical={false} stroke="var(--color-border)" />
+              <XAxis dataKey="name" tick={axisStyle} angle={-28} textAnchor="end" interval={0} height={44} tickMargin={6} tickFormatter={formatCaseOwnerLabel} />
               <YAxis tick={axisStyle} domain={[0, 110]} tickFormatter={(v) => `${v}%`} />
               <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={cursorStyle} formatter={(v) => [`${v}%`, "Completion"]} />
-              <Bar dataKey="Completion%" fill={BLUE} radius={[3, 3, 0, 0]} maxBarSize={28} />
+              <Bar dataKey="Completion%" fill={C1} radius={[3, 3, 0, 0]} maxBarSize={28} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Last Week and current Week Assignment" subtitle="CaseOwner" drillId="assignment" onDrill={onDrill}>
-          <ResponsiveContainer width="100%" height={180}>
-            <BarChart data={assignmentData} margin={{ top: 4, right: 8, left: -20, bottom: 30 }}>
-              <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.05)" />
-              <XAxis dataKey="name" tick={axisStyle} angle={-28} textAnchor="end" interval={0} height={56} tickMargin={6} tickFormatter={formatCaseOwnerLabel} />
+        <ChartCard
+          title="Pending workload: last week vs current"
+          subtitle="Count of pending assignments"
+        >
+          <ResponsiveContainer width="100%" height={160}>
+            <BarChart data={assignmentData} margin={{ top: 4, right: 8, left: -20, bottom: 36 }}>
+              <CartesianGrid vertical={false} stroke="var(--color-border)" />
+              <XAxis dataKey="name" tick={axisStyle} angle={-28} textAnchor="end" interval={0} height={44} tickMargin={6} tickFormatter={formatCaseOwnerLabel} />
               <YAxis tick={axisStyle} />
               <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={cursorStyle} />
-              <Legend wrapperStyle={{ fontSize: 10, color: "rgba(255,255,255,0.5)", paddingTop: 8 }} />
-              <Bar dataKey="Last Week" fill={BLUE} radius={[3, 3, 0, 0]} maxBarSize={22} />
-              <Bar dataKey="Pending" fill={RED} radius={[3, 3, 0, 0]} maxBarSize={22} />
+              <Legend wrapperStyle={{ fontSize: 10, color: "var(--color-text-secondary)", paddingTop: 8 }} />
+              <Bar dataKey="Last Week" fill={C2} radius={[3, 3, 0, 0]} maxBarSize={22} />
+              <Bar dataKey="Pending" fill={C5} radius={[3, 3, 0, 0]} maxBarSize={22} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
 
-        <ChartCard title="Progress Review Performance" subtitle="CaseOwner" drillId="pr-perf" onDrill={onDrill}>
-          <ResponsiveContainer width="100%" height={180}>
-            <BarChart data={prPerfData} margin={{ top: 4, right: 8, left: -20, bottom: 30 }}>
-              <CartesianGrid vertical={false} stroke="rgba(255,255,255,0.05)" />
-              <XAxis dataKey="name" tick={axisStyle} angle={-28} textAnchor="end" interval={0} height={56} tickMargin={6} tickFormatter={formatCaseOwnerLabel} />
+        <ChartCard
+          title="Progress review performance (last 12 weeks)"
+          subtitle="Required vs completed vs behind"
+        >
+          <ResponsiveContainer width="100%" height={160}>
+            <BarChart data={prPerfData} margin={{ top: 4, right: 8, left: -20, bottom: 36 }}>
+              <CartesianGrid vertical={false} stroke="var(--color-border)" />
+              <XAxis dataKey="name" tick={axisStyle} angle={-28} textAnchor="end" interval={0} height={44} tickMargin={6} tickFormatter={formatCaseOwnerLabel} />
               <YAxis tick={axisStyle} />
               <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={cursorStyle} />
-              <Legend wrapperStyle={{ fontSize: 10, color: "rgba(255,255,255,0.5)", paddingTop: 8 }} />
-              <Bar dataKey="Last 4 Weeks" fill={BLUE} radius={[3, 3, 0, 0]} maxBarSize={16} />
-              <Bar dataKey="Total Overall (PR)" fill={RED} radius={[3, 3, 0, 0]} maxBarSize={16} />
-              <Bar dataKey="Overall Completed" fill={YELLOW} radius={[3, 3, 0, 0]} maxBarSize={16} />
+              <Legend wrapperStyle={{ fontSize: 10, color: "var(--color-text-secondary)", paddingTop: 8 }} />
+              <Bar dataKey="Required" fill={C5} radius={[3, 3, 0, 0]} maxBarSize={16} />
+              <Bar dataKey="Completed" fill={C4} radius={[3, 3, 0, 0]} maxBarSize={16} />
+              <Bar dataKey="Behind" fill={C3} radius={[3, 3, 0, 0]} maxBarSize={16} />
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
+
+        <ChartCard
+          title="MCM performance (last 12 weeks)"
+          subtitle="Required vs completed vs behind"
+        >
+          <ResponsiveContainer width="100%" height={160}>
+            <BarChart data={mcmPerfData} margin={{ top: 4, right: 8, left: -20, bottom: 36 }}>
+              <CartesianGrid vertical={false} stroke="var(--color-border)" />
+              <XAxis dataKey="name" tick={axisStyle} angle={-28} textAnchor="end" interval={0} height={44} tickMargin={6} tickFormatter={formatCaseOwnerLabel} />
+              <YAxis tick={axisStyle} />
+              <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={cursorStyle} />
+              <Legend wrapperStyle={{ fontSize: 10, color: "var(--color-text-secondary)", paddingTop: 8 }} />
+              <Bar dataKey="Required" fill={C5} radius={[3, 3, 0, 0]} maxBarSize={16} />
+              <Bar dataKey="Completed" fill={C2} radius={[3, 3, 0, 0]} maxBarSize={16} />
+              <Bar dataKey="Behind" fill={C3} radius={[3, 3, 0, 0]} maxBarSize={16} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>

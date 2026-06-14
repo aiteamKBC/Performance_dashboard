@@ -2,18 +2,32 @@ import { CoachSummaryRecord } from "@/mocks/coachSummary";
 
 const WEEKS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
-function ratioColor(ratio: number, isOverall?: boolean): string {
-  if (ratio === 0) return "bg-[#1a3a2a] text-[#22c55e]";
-  if (ratio < 15) return "bg-[#1a2a1a] text-[#86efac]";
-  if (ratio < 25) return isOverall ? "bg-[#3a1a00] text-[#fb923c]" : "bg-[#2a1a00] text-[#fbbf24]";
-  return "bg-[#3a1010] text-[#f87171]";
+function RatioBadge({ ratio, isOverall }: { ratio: number; isOverall?: boolean }) {
+  const bg = ratio === 0 ? "var(--color-success-bg)"
+    : ratio < 15 ? "var(--color-success-bg)"
+    : ratio < 25 ? "var(--color-warning-bg)"
+    : "var(--color-danger-bg)";
+  const color = ratio === 0 ? "var(--color-success)"
+    : ratio < 15 ? "var(--color-success)"
+    : ratio < 25 ? (isOverall ? "var(--color-warning)" : "var(--color-warning)")
+    : "var(--color-danger)";
+  return (
+    <span className="badge" style={{ background: bg, color, fontVariantNumeric: "tabular-nums" }}>
+      {ratio.toFixed(ratio < 10 ? 2 : 1)}%
+    </span>
+  );
 }
 
-function vsCompanyColor(vs: number): string {
-  if (vs === 0) return "text-white/30";
-  if (vs <= 5) return "text-[#86efac]";
-  if (vs <= 15) return "text-[#fbbf24]";
-  return "text-[#f87171]";
+function VsCompany({ vs }: { vs: number }) {
+  const color = vs === 100 ? "var(--color-text-muted)"
+    : vs <= 5 ? "var(--color-success)"
+    : vs <= 15 ? "var(--color-warning)"
+    : "var(--color-danger)";
+  return (
+    <span className="tabular-nums" style={{ fontSize: "var(--text-xs)", color }}>
+      {vs === 100 ? "—" : `${vs}%`}
+    </span>
+  );
 }
 
 export default function CoachSummaryTable({ records }: { records: CoachSummaryRecord[] }) {
@@ -26,123 +40,131 @@ export default function CoachSummaryTable({ records }: { records: CoachSummaryRe
   };
 
   return (
-    <div className="bg-[#111111] rounded-2xl border border-white/8 overflow-hidden">
-      {/* Header bar — matches MasterTable */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-white/8">
+    <div className="table-card">
+      <div className="table-toolbar">
         <div>
-          <p className="text-[11px] text-white/30 uppercase tracking-widest mb-0.5">All Coaches</p>
-          <h2 className="text-white font-bold text-lg leading-none">Absence Summary</h2>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>All Coaches</div>
+          <h2 style={{ margin: 0, fontSize: "var(--text-md)", fontWeight: "var(--font-semibold)" }}>Absence Summary</h2>
         </div>
-        <div className="flex items-center gap-4 text-xs text-white/30">
-          <span className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-[#22c55e] inline-block" />Perfect
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "var(--space-4)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", fontSize: "var(--text-xs)" }}>
+            <span className="badge badge--success">Perfect / &lt;15%</span>
+            <span className="badge badge--warning">Warning</span>
+            <span className="badge badge--danger">Critical</span>
+          </div>
+          <span className="tabular-nums" style={{ fontSize: "var(--text-sm)", color: "var(--color-text-muted)" }}>
+            {coaches.length} coaches
           </span>
-          <span className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-[#86efac] inline-block" />&lt;15%
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-[#fbbf24] inline-block" />Warning
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-[#f87171] inline-block" />Critical
-          </span>
-          <span className="font-mono">{coaches.length} coaches</span>
         </div>
       </div>
 
-      <div className="overflow-x-auto themed-scrollbar">
-      <table className="w-full text-xs text-white/80 border-collapse min-w-[1400px]">
-        <thead>
-          {/* Week date header */}
-          <tr className="bg-[#0f0f0f] border-b border-white/8">
-            <th className="text-left px-4 py-3 text-white/40 font-medium w-44 sticky left-0 bg-[#0f0f0f] z-10">Coach</th>
-            <th className="px-3 py-3 text-white/40 font-medium text-center w-16">Students</th>
-            {WEEKS.map((w) => {
-              const sample = overall?.weeks[w - 1];
-              return (
-                <th key={w} colSpan={2} className="px-2 py-2 text-center border-l border-white/5">
-                  <div className="text-[#7c4daa] font-bold text-xs">W{w}</div>
-                  {sample && (
-                    <div className="text-white/25 text-[10px] font-normal">
-                      {formatDate(sample.weekStart)}–{formatDate(sample.weekEnd)}
-                    </div>
-                  )}
-                </th>
-              );
-            })}
-            <th className="px-3 py-3 text-white/40 font-medium text-center border-l border-white/10">10W Avg</th>
-          </tr>
-          {/* Sub-header */}
-          <tr className="bg-white/[0.02] border-b border-white/8">
-            <th className="sticky left-0 bg-[#111] z-10 px-4 py-2"></th>
-            <th className="px-3 py-2 text-white/25 font-normal text-center">Count</th>
-            {WEEKS.map((w) => (
+      <div className="table-scroll themed-scrollbar">
+        <table className="data-table" style={{ minWidth: 1400 }}>
+          <thead>
+            <tr>
+              <th scope="col" style={{
+                position: "sticky", left: 0, zIndex: 20,
+                background: "var(--color-canvas)", minWidth: 160,
+                textAlign: "left",
+              }}>Coach</th>
+              <th scope="col" className="num">Students</th>
+              {WEEKS.map((w) => {
+                const sample = overall?.weeks[w - 1];
+                return (
+                  <th key={w} scope="col" colSpan={2} style={{
+                    textAlign: "center",
+                    borderLeft: "2px solid var(--color-border)",
+                    color: "var(--color-accent)",
+                  }}>
+                    <div>W{w}</div>
+                    {sample && (
+                      <div style={{ fontWeight: "var(--font-normal)", color: "var(--color-text-muted)", fontSize: "var(--text-xs)" }}>
+                        {formatDate(sample.weekStart)}–{formatDate(sample.weekEnd)}
+                      </div>
+                    )}
+                  </th>
+                );
+              })}
+              <th scope="col" className="num" style={{ borderLeft: "2px solid var(--color-border)" }}>10W Avg</th>
+            </tr>
+            <tr>
+              <th scope="col" style={{ position: "sticky", left: 0, zIndex: 20, background: "var(--color-canvas)" }} />
+              <th scope="col" className="num" style={{ color: "var(--color-text-muted)", fontWeight: "var(--font-normal)" }}>Count</th>
+              {WEEKS.map((w) => (
+                <>
+                  <th key={`${w}-abs`} scope="col" style={{ textAlign: "center", borderLeft: "2px solid var(--color-border)", color: "var(--color-text-muted)", fontWeight: "var(--font-normal)" }}>Abs %</th>
+                  <th key={`${w}-cmp`} scope="col" style={{ textAlign: "center", color: "var(--color-text-muted)", fontWeight: "var(--font-normal)" }}>vs Co.</th>
+                </>
+              ))}
+              <th scope="col" style={{ textAlign: "center", borderLeft: "2px solid var(--color-border)", color: "var(--color-text-muted)", fontWeight: "var(--font-normal)" }}>Abs %</th>
+            </tr>
+          </thead>
+          <tbody>
+            {coaches.map((row, idx) => (
               <>
-                <th key={`${w}-abs`} className="px-2 py-2 text-white/30 font-normal text-center border-l border-white/5 whitespace-nowrap">Abs %</th>
-                <th key={`${w}-cmp`} className="px-2 py-2 text-white/30 font-normal text-center whitespace-nowrap">vs Co.</th>
+                <tr key={row.coachName} style={{ background: idx % 2 === 0 ? "transparent" : "rgba(0,0,0,0.015)" }}>
+                  <th scope="row" style={{
+                    position: "sticky", left: 0, zIndex: 10,
+                    background: idx % 2 === 0 ? "var(--color-surface)" : "var(--color-canvas)",
+                    padding: "var(--space-3) var(--space-4)",
+                    fontWeight: "var(--font-medium)", color: "var(--color-text-primary)",
+                    fontSize: "var(--text-xs)", whiteSpace: "nowrap", textAlign: "left",
+                  }}>
+                    {row.coachName}
+                  </th>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)" }}>{row.studentsCount}</td>
+                  {row.weeks.map((w, wi) => (
+                    <>
+                      <td key={`${wi}-abs`} style={{ padding: "var(--space-2) var(--space-3)", textAlign: "center", borderLeft: "2px solid var(--color-border)" }}>
+                        <RatioBadge ratio={w.absenceRatio} />
+                      </td>
+                      <td key={`${wi}-vs`} style={{ padding: "var(--space-2) var(--space-3)", textAlign: "center" }}>
+                        <VsCompany vs={w.vsCompany} />
+                      </td>
+                    </>
+                  ))}
+                  <td style={{ padding: "var(--space-2) var(--space-3)", textAlign: "center", borderLeft: "2px solid var(--color-border)" }}>
+                    <RatioBadge ratio={row.last10WeeksAbsenceRatio} />
+                  </td>
+                </tr>
               </>
             ))}
-            <th className="px-3 py-2 text-white/30 font-normal text-center border-l border-white/10">Abs %</th>
-          </tr>
-        </thead>
-        <tbody>
-          {coaches.map((row, idx) => (
-            <tr
-              key={row.coachName}
-              className={`border-b border-white/[0.04] transition-colors ${idx % 2 === 0 ? "bg-transparent" : "bg-white/[0.015]"}`}
-            >
-              <td className={`sticky left-0 z-10 px-4 py-3 font-medium text-white/90 whitespace-nowrap ${idx % 2 === 0 ? "bg-[#111111]" : "bg-[#141414]"}`}>
-                {row.coachName}
-              </td>
-              <td className="px-3 py-3 text-center text-white/50">{row.studentsCount}</td>
-              {row.weeks.map((w, wi) => (
-                <>
-                  <td key={`${wi}-abs`} className={`px-2 py-2 text-center border-l border-white/5`}>
-                    <span className={`inline-block rounded px-2 py-0.5 font-mono font-bold text-[11px] ${ratioColor(w.absenceRatio)}`}>
-                      {w.absenceRatio.toFixed(2)}%
-                    </span>
-                  </td>
-                  <td key={`${wi}-vs`} className={`px-2 py-2 text-center font-mono text-[11px] ${vsCompanyColor(w.vsCompany)}`}>
-                    {w.vsCompany === 100 ? "—" : `${w.vsCompany}%`}
-                  </td>
-                </>
-              ))}
-              <td className="px-3 py-3 text-center border-l border-white/10">
-                <span className={`inline-block rounded px-2 py-0.5 font-mono font-bold text-[11px] ${ratioColor(row.last10WeeksAbsenceRatio)}`}>
-                  {row.last10WeeksAbsenceRatio.toFixed(1)}%
-                </span>
-              </td>
-            </tr>
-          ))}
 
-          {/* Overall Company row */}
-          {overall && (
-            <tr className="border-t-2 border-[#7c4daa]/40 bg-[#7c4daa]/[0.05]">
-              <td className="sticky left-0 z-10 bg-[#1a0f2a] px-4 py-3 font-bold text-[#c4b5fd] whitespace-nowrap uppercase tracking-wide text-xs">
-                {overall.coachName}
-              </td>
-              <td className="px-3 py-3 text-center text-white/70 font-bold">{overall.studentsCount}</td>
-              {overall.weeks.map((w, wi) => (
-                <>
-                  <td key={`overall-${wi}-abs`} className="px-2 py-2 text-center border-l border-white/5">
-                    <span className={`inline-block rounded px-2 py-0.5 font-mono font-bold text-[11px] ${ratioColor(w.absenceRatio, true)}`}>
-                      {w.absenceRatio.toFixed(2)}%
-                    </span>
-                  </td>
-                  <td key={`overall-${wi}-vs`} className="px-2 py-2 text-center font-mono text-[11px] text-white/30">
-                    100%
-                  </td>
-                </>
-              ))}
-              <td className="px-3 py-3 text-center border-l border-white/10">
-                <span className={`inline-block rounded px-2 py-0.5 font-mono font-bold text-[11px] ${ratioColor(overall.last10WeeksAbsenceRatio, true)}`}>
-                  {overall.last10WeeksAbsenceRatio.toFixed(1)}%
-                </span>
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+            {/* Overall Company row */}
+            {overall && (
+              <tr style={{ borderTop: `2px solid var(--color-accent)`, background: "var(--color-accent-tint)" }}>
+                <th scope="row" style={{
+                  position: "sticky", left: 0, zIndex: 10,
+                  background: "var(--color-accent-tint)",
+                  padding: "var(--space-3) var(--space-4)",
+                  fontWeight: "var(--font-semibold)", color: "var(--color-accent)",
+                  fontSize: "var(--text-xs)", textTransform: "uppercase", letterSpacing: "0.05em",
+                  whiteSpace: "nowrap", textAlign: "left",
+                }}>
+                  {overall.coachName}
+                </th>
+                <td className="num" style={{ padding: "var(--space-3) var(--space-4)", fontWeight: "var(--font-semibold)" }}>{overall.studentsCount}</td>
+                {overall.weeks.map((w, wi) => (
+                  <>
+                    <td key={`overall-${wi}-abs`} style={{ padding: "var(--space-2) var(--space-3)", textAlign: "center", borderLeft: "2px solid var(--color-border)" }}>
+                      <RatioBadge ratio={w.absenceRatio} isOverall />
+                    </td>
+                    <td key={`overall-${wi}-vs`} style={{ padding: "var(--space-2) var(--space-3)", textAlign: "center", color: "var(--color-text-muted)", fontSize: "var(--text-xs)" }}>
+                      100%
+                    </td>
+                  </>
+                ))}
+                <td style={{ padding: "var(--space-2) var(--space-3)", textAlign: "center", borderLeft: "2px solid var(--color-border)" }}>
+                  <RatioBadge ratio={overall.last10WeeksAbsenceRatio} isOverall />
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="table-footer">
+        <span>{coaches.length} coaches</span>
       </div>
     </div>
   );

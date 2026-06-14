@@ -9,17 +9,17 @@ const COMPANY_COLOR = "var(--coach-summary-chart-company)";
 const ACCENT = "var(--coach-summary-chart-accent)";
 
 const tooltipStyle = {
-  backgroundColor: "#1e1e2e",
-  border: "1px solid rgba(255,255,255,0.15)",
-  borderRadius: "8px",
-  color: "#ffffff",
-  fontSize: "11px",
+  backgroundColor: "#ffffff",
+  border: "1px solid #E5E7EB",
+  borderRadius: 8,
+  color: "#111827",
+  fontSize: 11,
+  boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
 };
-const tooltipLabelStyle = { color: "#ffffff", fontWeight: 600 };
-const tooltipItemStyle = { color: "#d1d5db" };
-const cursorStyle = { fill: "rgba(255,255,255,0.04)" };
-const axisStyle = { fontSize: 10, fill: "rgba(255,255,255,0.35)" };
-const dropdownOptionStyle = { color: "#111827", backgroundColor: "#f3f4f6" };
+const tooltipLabelStyle = { color: "#111827", fontWeight: 600 };
+const tooltipItemStyle = { color: "#6B7280" };
+const cursorStyle = { fill: "#EEF2FF" };
+const axisStyle = { fontSize: 10, fill: "#9CA3AF" };
 
 const weekLabels = ["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10"];
 
@@ -55,13 +55,12 @@ export default function CoachSummaryCharts({ records }: { records: CoachSummaryR
   });
 
   const trendData = weekLabels.map((label, li) => {
-    const weekIdx = li;
     const row: Record<string, string | number> = { week: label };
     coachLineMeta.forEach((line) => {
-      row[line.key] = parseFloat(line.coach.weeks[weekIdx].absenceRatio.toFixed(2));
+      row[line.key] = parseFloat(line.coach.weeks[li].absenceRatio.toFixed(2));
     });
     if (overall) {
-      row["Company"] = parseFloat(overall.weeks[weekIdx].absenceRatio.toFixed(2));
+      row["Company"] = parseFloat(overall.weeks[li].absenceRatio.toFixed(2));
     }
     return row;
   });
@@ -82,107 +81,120 @@ export default function CoachSummaryCharts({ records }: { records: CoachSummaryR
     avg: r.last10WeeksAbsenceRatio,
     company: overall?.last10WeeksAbsenceRatio ?? 0,
   }));
+
+
+  
   return (
-    <div className="coach-summary-charts grid grid-cols-1 gap-6">
-      {/* Chart 1: 10-week trend lines */}
-      <div className="bg-[#111] rounded-xl border border-white/10 p-5">
-        <div className="flex items-start justify-between gap-3 mb-4">
+    <div className="coach-summary-charts" style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
+      {/* Chart 1: 10-week trend */}
+      <div className="chart-card">
+        <div className="chart-header">
           <div>
-            <div className="text-xs text-white/40 uppercase tracking-widest mb-1">10-Week Trend</div>
-            <div className="font-bold text-white text-sm">Absence Ratio Over Time (All Coaches)</div>
+            <h3 className="chart-title">Absence ratio trends — watch for coaches consistently above company average</h3>
+            <p className="chart-subtitle">10-week trend — all coaches vs company baseline</p>
           </div>
-          <div className="shrink-0">
+          <div>
             <label className="sr-only" htmlFor="trend-series-filter">Filter line</label>
             <select
               id="trend-series-filter"
               value={selectedSeries}
               onChange={(e) => setSelectedSeries(e.target.value)}
-              className="rounded-md border border-white/15 bg-white/5 px-2.5 py-1.5 text-xs text-white/80 outline-none focus:border-[#7c4daa]"
+              style={{
+                borderRadius: "var(--radius-md)", border: "1px solid var(--color-border)",
+                background: "var(--color-canvas)", padding: "var(--space-1) var(--space-2)",
+                fontSize: "var(--text-xs)", color: "var(--color-text-primary)", outline: "none",
+                cursor: "pointer",
+              }}
             >
-              <option value="all" style={dropdownOptionStyle}>All Coaches</option>
+              <option value="all">All Coaches</option>
               {coachLineMeta.map((line) => (
-                <option key={line.key} value={line.key} style={dropdownOptionStyle}>{line.shortLabel}</option>
+                <option key={line.key} value={line.key}>{line.shortLabel}</option>
               ))}
-              <option value="Company" style={dropdownOptionStyle}>Company</option>
+              <option value="Company">Company</option>
             </select>
           </div>
         </div>
-        <ResponsiveContainer width="100%" height={220}>
-          <LineChart data={trendData} margin={{ top: 0, right: 30, bottom: 0, left: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-            <XAxis dataKey="week" tick={axisStyle} />
-            <YAxis tick={axisStyle} tickFormatter={(v) => `${v}%`} />
-            <Tooltip
-              contentStyle={tooltipStyle}
-              labelStyle={tooltipLabelStyle}
-              itemStyle={tooltipItemStyle}
-              cursor={cursorStyle}
-              formatter={(value, name) => [`${value}%`, String(name)]}
-            />
-            {visibleCoachLines.map((line) => (
-              <Line
-                key={line.key}
-                type="monotone"
-                dataKey={line.key}
-                name={line.shortLabel}
-                stroke={line.color}
-                strokeWidth={1.5}
-                dot={false}
-                activeDot={{ r: 3 }}
+        <div className="chart-body">
+          <ResponsiveContainer width="100%" height={220}>
+            <LineChart data={trendData} margin={{ top: 0, right: 30, bottom: 0, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+              <XAxis dataKey="week" tick={axisStyle} />
+              <YAxis tick={axisStyle} tickFormatter={(v) => `${v}%`} />
+              <Tooltip
+                contentStyle={tooltipStyle}
+                labelStyle={tooltipLabelStyle}
+                itemStyle={tooltipItemStyle}
+                cursor={cursorStyle}
+                formatter={(value, name) => [`${value}%`, String(name)]}
               />
+              {visibleCoachLines.map((line) => (
+                <Line
+                  key={line.key}
+                  type="monotone"
+                  dataKey={line.key}
+                  name={line.shortLabel}
+                  stroke={line.color}
+                  strokeWidth={1.5}
+                  dot={false}
+                  activeDot={{ r: 3 }}
+                />
+              ))}
+              {showCompany && (
+                <Line
+                  type="monotone"
+                  dataKey="Company"
+                  name="Company"
+                  stroke={COMPANY_COLOR}
+                  strokeWidth={2.5}
+                  strokeDasharray="5 3"
+                  dot={false}
+                  activeDot={{ r: 4 }}
+                />
+              )}
+            </LineChart>
+          </ResponsiveContainer>
+          <div style={{ marginTop: "var(--space-3)", display: "flex", flexWrap: "wrap", gap: "var(--space-3)" }}>
+            {trendLegendItems.map((item) => (
+              <span key={item.key} style={{ display: "inline-flex", alignItems: "center", gap: "var(--space-1)", fontSize: "var(--text-xs)", color: "var(--color-text-secondary)" }}>
+                <span style={{ display: "inline-block", width: 16, borderTop: `2px ${item.dashed ? "dashed" : "solid"} ${item.color}` }} />
+                {item.shortLabel}
+              </span>
             ))}
-            {showCompany && (
-              <Line
-                type="monotone"
-                dataKey="Company"
-                name="Company"
-                stroke={COMPANY_COLOR}
-                strokeWidth={2.5}
-                strokeDasharray="5 3"
-                dot={false}
-                activeDot={{ r: 4 }}
-              />
-            )}
-          </LineChart>
-        </ResponsiveContainer>
-        <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5">
-          {trendLegendItems.map((item) => (
-            <span key={item.key} className="inline-flex items-center gap-1.5 text-[10px] text-white/60">
-              <span
-                className={`inline-block w-4 border-t-2 ${item.dashed ? "border-dashed" : ""}`}
-                style={{ borderColor: item.color }}
-              />
-              {item.shortLabel}
-            </span>
-          ))}
+          </div>
         </div>
       </div>
 
-      {/* Chart 2: 10W avg per coach */}
-      <div className="bg-[#111] rounded-xl border border-white/10 p-5">
-        <div className="text-xs text-white/40 uppercase tracking-widest mb-1">Rolling Average</div>
-        <div className="font-bold text-white text-sm mb-4">10-Week Average Absence Ratio per Coach</div>
-        <ResponsiveContainer width="100%" height={200}>
-          <BarChart data={avgData} margin={{ top: 0, right: 10, bottom: 40, left: 0 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-            <XAxis dataKey="name" tick={axisStyle} angle={-35} textAnchor="end" interval={0} />
-            <YAxis tick={axisStyle} tickFormatter={(v) => `${v}%`} />
-            <Tooltip
-              contentStyle={tooltipStyle}
-              labelStyle={tooltipLabelStyle}
-              itemStyle={tooltipItemStyle}
-              cursor={cursorStyle}
-              formatter={(value, name) => [`${value}%`, String(name)]}
-            />
-            <ReferenceLine
-              y={overall?.last10WeeksAbsenceRatio ?? 0}
-              stroke={COMPANY_COLOR}
-              strokeDasharray="4 4"
-              label={{ value: `Co. avg ${overall?.last10WeeksAbsenceRatio ?? 0}%`, fill: COMPANY_COLOR, fontSize: 10, position: "insideTopRight" }}
-            />
-            <Bar dataKey="avg" name="10W Avg Absence %" fill={ACCENT} radius={[3, 3, 0, 0]} />
-          </BarChart>
-        </ResponsiveContainer>
+      {/* Chart 2: 10W avg bar */}
+      <div className="chart-card">
+        <div className="chart-header">
+          <div>
+            <h3 className="chart-title">Coaches above company average on 10-week absence rate need support</h3>
+            <p className="chart-subtitle">10-week average absence ratio per coach</p>
+          </div>
+        </div>
+        <div className="chart-body">
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={avgData} margin={{ top: 0, right: 10, bottom: 40, left: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
+              <XAxis dataKey="name" tick={axisStyle} angle={-35} textAnchor="end" interval={0} />
+              <YAxis tick={axisStyle} tickFormatter={(v) => `${v}%`} />
+              <Tooltip
+                contentStyle={tooltipStyle}
+                labelStyle={tooltipLabelStyle}
+                itemStyle={tooltipItemStyle}
+                cursor={cursorStyle}
+                formatter={(value, name) => [`${value}%`, String(name)]}
+              />
+              <ReferenceLine
+                y={overall?.last10WeeksAbsenceRatio ?? 0}
+                stroke={COMPANY_COLOR}
+                strokeDasharray="4 4"
+                label={{ value: `Co. avg ${overall?.last10WeeksAbsenceRatio ?? 0}%`, fill: "#6B7280", fontSize: 10, position: "insideTopRight" }}
+              />
+              <Bar dataKey="avg" name="10W Avg Absence %" fill={ACCENT} radius={[3, 3, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
       </div>
     </div>
   );

@@ -18,71 +18,63 @@ export default function EvidencePanel({ records }: EvidencePanelProps) {
   const referredPct = totalEvidence ? Math.round((totalReferred / totalEvidence) * 100) : 0;
 
   const stats = [
-    { label: "Evidence Accepted", value: totalAccepted, pct: acceptedPct, color: "#a8f0c6", icon: "ri-check-line" },
-    { label: "Evidence Referred", value: totalReferred, pct: referredPct, color: "#7c4daa", icon: "ri-send-plane-line" },
-    { label: "Referred Closure", value: totalClosure, pct: avgClosurePct, color: "#c4b5fd", icon: "ri-lock-2-line" },
-    { label: "Total Evidence", value: totalEvidence, pct: 100, color: "#7c4daa", icon: "ri-file-list-3-line" },
+    { label: "Evidence Accepted", value: totalAccepted, pct: acceptedPct, color: "var(--color-success)", bgColor: "var(--color-success-bg)", icon: "ri-check-line", statusClass: "kpi-status--success" },
+    { label: "Evidence Referred", value: totalReferred, pct: referredPct, color: "var(--color-warning)", bgColor: "var(--color-warning-bg)", icon: "ri-send-plane-line", statusClass: "kpi-status--warning" },
+    { label: "Referred Closure", value: totalClosure, pct: avgClosurePct, color: "var(--color-info)", bgColor: "var(--color-info-bg)", icon: "ri-lock-2-line", statusClass: "kpi-status--info" },
+    { label: "Total Evidence", value: totalEvidence, pct: 100, color: "var(--color-accent)", bgColor: "var(--color-accent-tint)", icon: "ri-file-list-3-line", statusClass: "" },
   ];
 
   return (
-    <div className="bg-[#141414] rounded-2xl p-6 border border-white/8">
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <div className="text-xs text-white/30 uppercase tracking-widest mb-1">Evidence Pipeline</div>
-          <h2 className="text-white font-bold text-lg">Submission Tracking</h2>
-        </div>
-        <div className="text-xs font-mono text-white/30">{avgClosurePct}% closure rate</div>
+    <div className="kpi-card" style={{ gap: "var(--space-4)" }}>
+      <div className="kpi-header">
+        <span className="kpi-label">Evidence Pipeline</span>
+        <span className="kpi-info" title="Evidence submission and closure tracking">ⓘ</span>
       </div>
 
-      {/* Donut-style row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
+        gap: "var(--space-3)",
+      }}>
         {stats.map((s) => (
-          <div key={s.label} className="bg-white/5 rounded-xl p-4 flex flex-col gap-3">
-            {/* Radial progress simulation */}
-            <div className="relative w-14 h-14 flex items-center justify-center">
-              <svg viewBox="0 0 40 40" className="absolute inset-0 w-full h-full -rotate-90">
-                <circle cx="20" cy="20" r="16" fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth="3" />
-                <circle
-                  cx="20"
-                  cy="20"
-                  r="16"
-                  fill="none"
-                  stroke={s.color}
-                  strokeWidth="3"
-                  strokeDasharray={`${(s.pct / 100) * 100.5} 100.5`}
-                  strokeLinecap="round"
-                />
-              </svg>
-              <div className="w-7 h-7 flex items-center justify-center">
-                <i className={`${s.icon} text-base`} style={{ color: s.color }}></i>
-              </div>
+          <div key={s.label} style={{
+            background: s.bgColor,
+            borderRadius: "var(--radius-md)",
+            padding: "var(--space-4)",
+            display: "flex", flexDirection: "column", gap: "var(--space-2)",
+            border: "1px solid var(--color-border)",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <i className={s.icon} style={{ color: s.color, fontSize: 16 }} aria-hidden="true" />
+              <span className="tabular-nums" style={{ fontSize: "var(--text-xs)", fontWeight: "var(--font-semibold)", color: s.color }}>{s.pct}%</span>
             </div>
-            <div>
-              <div className="text-2xl font-black text-white">{s.value.toLocaleString()}</div>
-              <div className="text-xs text-white/40 mt-0.5 leading-snug">{s.label}</div>
-            </div>
-            <div className="text-xs font-mono" style={{ color: s.color }}>{s.pct}%</div>
+            <div className="kpi-value" style={{ fontSize: "var(--text-xl)" }}>{s.value.toLocaleString()}</div>
+            <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", lineHeight: "var(--leading-snug)" }}>{s.label}</div>
           </div>
         ))}
       </div>
 
       {/* Evidence bar breakdown per record */}
-      <div className="mt-6 space-y-2">
-        {records.map((r) => {
-          const accPct = r.totalEvidence ? Math.round((r.evidenceAccepted / r.totalEvidence) * 100) : 0;
-          const refPct = r.totalEvidence ? Math.round((r.evidenceReferred / r.totalEvidence) * 100) : 0;
-          return (
-            <div key={r.id} className="flex items-center gap-3">
-              <div className="w-28 text-xs text-white/40 truncate shrink-0">{r.associate}</div>
-              <div className="flex-1 h-2 bg-white/8 rounded-full overflow-hidden flex gap-0.5">
-                <div className="bg-[#a8f0c6] h-full rounded-l-full" style={{ width: `${accPct}%` }} />
-                <div className="bg-[#7c4daa] h-full" style={{ width: `${refPct}%` }} />
+      {records.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)", marginTop: "var(--space-2)" }}>
+          {records.slice(0, 8).map((r) => {
+            const accPct = r.totalEvidence ? Math.round((r.evidenceAccepted / r.totalEvidence) * 100) : 0;
+            const refPct = r.totalEvidence ? Math.round((r.evidenceReferred / r.totalEvidence) * 100) : 0;
+            return (
+              <div key={r.id} style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+                <div style={{ width: 112, fontSize: "var(--text-xs)", color: "var(--color-text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flexShrink: 0 }}>
+                  {r.associate}
+                </div>
+                <div style={{ flex: 1, height: 6, background: "var(--color-border)", borderRadius: 999, overflow: "hidden", display: "flex", gap: 1 }}>
+                  <div style={{ width: `${accPct}%`, background: "var(--color-success)", borderRadius: "999px 0 0 999px" }} />
+                  <div style={{ width: `${refPct}%`, background: "var(--color-warning)" }} />
+                </div>
+                <div className="tabular-nums" style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", width: 32, textAlign: "right" }}>{r.totalEvidence}</div>
               </div>
-              <div className="text-xs text-white/30 font-mono w-10 text-right">{r.totalEvidence}</div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

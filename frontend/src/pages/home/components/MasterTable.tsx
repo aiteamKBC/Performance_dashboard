@@ -3,64 +3,54 @@ import type { CoachRecord } from "@/mocks/dashboard";
 
 interface MasterTableProps {
   records: CoachRecord[];
+  onRowClick?: (record: CoachRecord) => void;
 }
 
 type SortKey = keyof CoachRecord;
 type SortDir = "asc" | "desc";
 
 function Chip({
-  value,
-  good,
-  warn,
-  suffix = "",
-  invert = false,
+  value, good, warn, suffix = "", invert = false,
 }: {
-  value: number;
-  good: number;
-  warn: number;
-  suffix?: string;
-  invert?: boolean;
+  value: number; good: number; warn: number; suffix?: string; invert?: boolean;
 }) {
   let tone: "good" | "warn" | "risk" = "good";
   if (invert) {
-    // higher = worse
     if (value >= warn) tone = "risk";
     else if (value >= good) tone = "warn";
   } else {
-    // higher = better
     if (value < warn) tone = "risk";
     else if (value < good) tone = "warn";
   }
 
-  const toneStyles =
-    tone === "good"
-      ? { text: "text-[#a8f0c6]", bg: "bg-[#a8f0c6]/15", dot: "bg-[#a8f0c6]" }
-      : tone === "warn"
-        ? { text: "text-[#7c4daa]", bg: "bg-[#7c4daa]/15", dot: "bg-[#7c4daa]" }
-        : { text: "text-[#ff7a7a]", bg: "bg-[#ff7a7a]/15", dot: "bg-[#ff7a7a]" };
+  const cls = tone === "good" ? "badge--success"
+    : tone === "warn" ? "badge--warning"
+    : "badge--danger";
+
+  const label = tone === "good" ? "Good" : tone === "warn" ? "Warning" : "At Risk";
 
   return (
-    <span
-      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-mono whitespace-nowrap ${toneStyles.text} ${toneStyles.bg}`}
-    >
-      <span className={`w-1.5 h-1.5 rounded-full inline-block shrink-0 ${toneStyles.dot}`} />
+    <span className={`badge ${cls}`} title={label}>
       {value}{suffix}
     </span>
   );
 }
 
-function Plain({ val, dim = false }: { val: string | number; dim?: boolean }) {
+function Num({ val, dim = false }: { val: string | number; dim?: boolean }) {
   return (
-    <span className={`text-xs font-mono whitespace-nowrap ${dim ? "text-white/40" : "text-white/80"}`}>
+    <span className="tabular-nums" style={{
+      fontSize: "var(--text-xs)",
+      whiteSpace: "nowrap",
+      color: dim ? "var(--color-text-muted)" : "var(--color-text-primary)",
+    }}>
       {val}
     </span>
   );
 }
 
-export default function MasterTable({ records }: MasterTableProps) {
+export default function MasterTable({ records, onRowClick }: MasterTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>("coach");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
-  const [expandedRow, setExpandedRow] = useState<number | null>(null);
 
   const getMarkingProgressWeekly = (record: CoachRecord) => {
     if (record.lastWeekPending <= 0) return 0;
@@ -92,7 +82,6 @@ export default function MasterTable({ records }: MasterTableProps) {
       : String(bv).localeCompare(String(av));
   });
 
-  // Totals row
   const totalLastWeekPending = records.reduce((s, r) => s + r.lastWeekPending, 0);
   const totalPending = records.reduce((s, r) => s + r.pending, 0);
   const totalReferredClosure = records.reduce((s, r) => s + r.referredClosure, 0);
@@ -107,10 +96,17 @@ export default function MasterTable({ records }: MasterTableProps) {
     lastWeekPending: totalLastWeekPending,
     pending: totalPending,
     markingProgressWeekly: totalLastWeekPending > 0
-      ? (totalLastWeekPending - totalPending) / totalLastWeekPending
-      : 0,
+      ? (totalLastWeekPending - totalPending) / totalLastWeekPending : 0,
     referredClosure: totalReferredClosure,
-    // PR totals
+    evToday: records.reduce((s, r) => s + (r.evToday ?? 0), 0),
+    evYesterday: records.reduce((s, r) => s + (r.evYesterday ?? 0), 0),
+    evMinus2: records.reduce((s, r) => s + (r.evMinus2 ?? 0), 0),
+    evMinus3: records.reduce((s, r) => s + (r.evMinus3 ?? 0), 0),
+    evMinus4: records.reduce((s, r) => s + (r.evMinus4 ?? 0), 0),
+    evMinus5: records.reduce((s, r) => s + (r.evMinus5 ?? 0), 0),
+    evMinus6: records.reduce((s, r) => s + (r.evMinus6 ?? 0), 0),
+    evMinus7: records.reduce((s, r) => s + (r.evMinus7 ?? 0), 0),
+    evidenceWeekTotal: records.reduce((s, r) => s + (r.evidenceWeekTotal ?? 0), 0),
     prToday: records.reduce((s, r) => s + r.prToday, 0),
     prYesterday: records.reduce((s, r) => s + r.prYesterday, 0),
     prMinus2: records.reduce((s, r) => s + r.prMinus2, 0),
@@ -129,346 +125,332 @@ export default function MasterTable({ records }: MasterTableProps) {
     prOverallCompleted: records.reduce((s, r) => s + r.prOverallCompleted, 0),
     prOverallBehind: records.reduce((s, r) => s + r.prOverallBehind, 0),
     prOverallCompletionRate: records.length ? Math.round(records.reduce((s, r) => s + r.prOverallCompletionRate, 0) / records.length * 10) / 10 : 0,
+    mcmRequired4Weeks: records.reduce((s, r) => s + (r.mcmRequired4Weeks ?? 0), 0),
+    mcmCompleted4Weeks: records.reduce((s, r) => s + (r.mcmCompleted4Weeks ?? 0), 0),
+    mcmRequired8Weeks: records.reduce((s, r) => s + (r.mcmRequired8Weeks ?? 0), 0),
+    mcmCompleted8Weeks: records.reduce((s, r) => s + (r.mcmCompleted8Weeks ?? 0), 0),
+    mcmRequired12Weeks: records.reduce((s, r) => s + (r.mcmRequired12Weeks ?? 0), 0),
+    mcmCompleted12Weeks: records.reduce((s, r) => s + (r.mcmCompleted12Weeks ?? 0), 0),
   };
 
-  const Sorter = ({ col }: { col: SortKey }) => {
-    if (sortKey !== col) return <i className="ri-expand-up-down-fill text-white/20 text-[9px] ml-0.5" />;
+  const pctOf = (done: number, req: number) => (req > 0 ? Math.round((done / req) * 1000) / 10 : 0);
+  const behindPctOf = (req: number, done: number) => (req > 0 ? Math.round((Math.max(req - done, 0) / req) * 1000) / 10 : 0);
+
+  const SortIcon = ({ col }: { col: SortKey }) => {
+    if (sortKey !== col) return <i className="ri-expand-up-down-fill" style={{ fontSize: 9, color: "var(--color-text-muted)", marginLeft: 2 }} aria-hidden="true" />;
     return sortDir === "asc"
-      ? <i className="ri-arrow-up-s-fill text-[#7c4daa] text-[9px] ml-0.5" />
-      : <i className="ri-arrow-down-s-fill text-[#7c4daa] text-[9px] ml-0.5" />;
+      ? <i className="ri-arrow-up-s-fill" style={{ fontSize: 9, color: "var(--color-accent)", marginLeft: 2 }} aria-hidden="true" />
+      : <i className="ri-arrow-down-s-fill" style={{ fontSize: 9, color: "var(--color-accent)", marginLeft: 2 }} aria-hidden="true" />;
   };
 
-  const TH = ({ col, label, align = "left", sticky = false }: { col: SortKey; label: string; align?: string; sticky?: boolean }) => (
-    <th
-      onClick={() => handleSort(col)}
-      className={`px-3 py-2.5 text-[10px] text-white/40 uppercase tracking-wide font-semibold cursor-pointer hover:text-white/70 transition-colors whitespace-nowrap select-none text-${align}${sticky ? " sticky left-0 z-20 bg-[#111111]" : ""}`}
-    >
-      <span className="inline-flex items-center gap-0.5">{label}<Sorter col={col} /></span>
-    </th>
-  );
+  const thStyle = (col: SortKey, sticky = false, borderRight = false): React.CSSProperties => ({
+    position: sticky ? "sticky" : undefined,
+    left: sticky ? 0 : undefined,
+    zIndex: sticky ? 20 : undefined,
+    background: "var(--color-canvas)",
+    borderRight: borderRight ? "2px solid var(--color-border)" : undefined,
+    cursor: "pointer",
+    userSelect: "none",
+    whiteSpace: "nowrap",
+    textAlign: "left",
+    color: sortKey === col ? "var(--color-accent)" : "var(--color-text-muted)",
+  });
 
   return (
-    <div className="bg-[#111111] rounded-2xl border border-white/8 overflow-hidden">
-      {/* Table header bar */}
-      <div className="flex items-center justify-between px-6 py-4 border-b border-white/8">
+    <div className="table-card">
+      {/* Toolbar */}
+      <div className="table-toolbar">
         <div>
-          <p className="text-[11px] text-white/30 uppercase tracking-widest mb-0.5">All Associates</p>
-          <h2 className="text-white font-bold text-lg leading-none">Performance Overview</h2>
+          <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>
+            All Associates
+          </div>
+          <h2 style={{ margin: 0, fontSize: "var(--text-md)", fontWeight: "var(--font-semibold)", color: "var(--color-text-primary)" }}>
+            Performance Overview
+          </h2>
         </div>
-        <div className="flex items-center gap-4 text-xs text-white/30">
-          <span className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-[#a8f0c6] inline-block" />Good
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "var(--space-4)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", fontSize: "var(--text-xs)", color: "var(--color-text-secondary)" }}>
+            <span className="badge badge--success">Good</span>
+            <span className="badge badge--warning">Warning</span>
+            <span className="badge badge--danger">At Risk</span>
+          </div>
+          <span className="tabular-nums" style={{ fontSize: "var(--text-sm)", color: "var(--color-text-muted)" }}>
+            {records.length} rows
           </span>
-          <span className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-[#7c4daa] inline-block" />Warning
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="w-2 h-2 rounded-full bg-[#ff7a7a] inline-block" />At Risk
-          </span>
-          <span className="font-mono">{records.length} rows</span>
         </div>
       </div>
 
-      <div className="overflow-x-auto themed-scrollbar">
-        <table className="w-full text-sm border-collapse">
-
-          {/* ── Group header row ── */}
-          <thead>
-            <tr className="border-b border-white/5">
-              {/* Identity group */}
-              <th className="px-3 py-2 text-center text-[9px] uppercase tracking-widest text-white/20 font-semibold sticky left-0 z-20 bg-[#111111]">
-                Identity
-              </th>
-              <th className="px-3 py-2 text-center text-[9px] uppercase tracking-widest text-white/20 font-semibold border-r border-white/5" />
-              {/* Activity group */}
-              <th colSpan={3} className="px-3 py-2 text-center text-[9px] uppercase tracking-widest text-white/20 font-semibold border-r border-white/5">
-                Activity
-              </th>
-              {/* Learners group */}
-              <th colSpan={3} className="px-3 py-2 text-center text-[9px] uppercase tracking-widest text-[#7c4daa]/70 font-semibold border-r border-white/5">
-                Learners
-              </th>
-              {/* OTJH group */}
-              <th colSpan={3} className="px-3 py-2 text-center text-[9px] uppercase tracking-widest text-[#7c4daa]/70 font-semibold border-r border-white/5">
-                OTJ Hours Risk
-              </th>
-              {/* Pending group */}
-              <th colSpan={3} className="px-3 py-2 text-center text-[9px] uppercase tracking-widest text-[#ff7a7a]/50 font-semibold border-r border-white/5">
-                Pending &amp; Marking
-              </th>
-              {/* Evidence group */}
-              <th colSpan={1} className="px-3 py-2 text-center text-[9px] uppercase tracking-widest text-[#a8f0c6]/50 font-semibold border-r border-white/5">
-                Evidence Pipeline
-              </th>
-              {/* PR Weekly group */}
-              <th colSpan={4} className="px-3 py-2 text-center text-[9px] uppercase tracking-widest text-[#c4b5fd]/60 font-semibold border-r border-white/5">
-                PR Weekly
-              </th>
-              {/* 4-Week PR group */}
-              <th colSpan={3} className="px-3 py-2 text-center text-[9px] uppercase tracking-widest text-[#c4b5fd]/60 font-semibold border-r border-white/5">
-                4-Week PR
-              </th>
-              {/* 8-Week PR group */}
-              <th colSpan={4} className="px-3 py-2 text-center text-[9px] uppercase tracking-widest text-[#c4b5fd]/60 font-semibold border-r border-white/5">
-                8-Week PR
-              </th>
-              {/* Overall PR group */}
-              <th colSpan={4} className="px-3 py-2 text-center text-[9px] uppercase tracking-widest text-[#c4b5fd]/80 font-semibold">
-                Overall PR
-              </th>
-            </tr>
-
-            {/* ── Column header row ── */}
-            <tr className="border-b border-white/8 bg-white/[0.02]">
-              {/* Identity */}
-              <TH col="coach" label="Coach" sticky />
-              <th className="px-3 py-2.5 text-[10px] text-white/40 uppercase tracking-wide font-semibold whitespace-nowrap border-r border-white/5">Phone</th>
-
-              {/* Activity */}
-              <TH col="lastSubDate" label="Last Sub" />
-              <TH col="elapsedDays" label="Elapsed" />
-              <th className="px-3 py-2.5 text-[10px] text-white/40 uppercase tracking-wide font-semibold whitespace-nowrap border-r border-white/5">Snapshot</th>
-
-              {/* Learners */}
-              <TH col="totalLearners" label="Total Learners" />
-              <TH col="recentSubmitters" label="Recent Submitters" />
-              <th className="px-3 py-2.5 text-[10px] text-white/40 uppercase tracking-wide font-semibold whitespace-nowrap border-r border-white/5">
-                <span className="inline-flex items-center gap-0.5">
-                  Engagement<Sorter col="learnerEngagement" />
-                </span>
-              </th>
-
-              {/* OTJH */}
-              <TH col="otjhOnTrack" label="On Track" />
-              <TH col="otjhNeedAttention" label="Attention" />
-              <th className="px-3 py-2.5 text-[10px] text-white/40 uppercase tracking-wide font-semibold whitespace-nowrap border-r border-white/5">
-                <span className="inline-flex items-center gap-0.5">
-                  At Risk<Sorter col="otjhAtRisk" />
-                </span>
-              </th>
-
-              {/* Pending */}
-              <TH col="lastWeekPending" label="Last Wk" />
-              <TH col="pending" label="Pending" />
-              <th className="px-3 py-2.5 text-[10px] text-white/40 uppercase tracking-wide font-semibold whitespace-nowrap border-r border-white/5">
-                <span className="inline-flex items-center gap-0.5">
-                  Marking Progress Weekly<Sorter col="markingProgressWeekly" />
-                </span>
-              </th>
-
-              {/* Evidence */}
-              <th onClick={() => handleSort("referredClosure")} className="px-3 py-2.5 text-[10px] text-white/40 uppercase tracking-wide font-semibold cursor-pointer hover:text-white/70 transition-colors whitespace-nowrap select-none border-r border-white/5">
-                <span className="inline-flex items-center gap-0.5">Referred Closure<Sorter col="referredClosure" /></span>
-              </th>
-
-              {/* PR Weekly */}
-              <TH col="prLastWeek" label="Last Wk PR" />
-              <TH col="prSecondWeek" label="-2nd Wk" />
-              <TH col="prThirdWeek" label="-3rd Wk" />
-              <th onClick={() => handleSort("prFourthWeek")} className="px-3 py-2.5 text-[10px] text-white/40 uppercase tracking-wide font-semibold cursor-pointer hover:text-white/70 transition-colors whitespace-nowrap select-none border-r border-white/5">
-                <span className="inline-flex items-center gap-0.5">-4th Wk<Sorter col="prFourthWeek" /></span>
-              </th>
-
-              {/* 4-Week PR */}
-              <TH col="prRequired4Weeks" label="Req 4Wk" />
-              <TH col="prCompleted4Weeks" label="Done 4Wk" />
-              <th onClick={() => handleSort("prBehindRate4Weeks")} className="px-3 py-2.5 text-[10px] text-white/40 uppercase tracking-wide font-semibold cursor-pointer hover:text-white/70 transition-colors whitespace-nowrap select-none border-r border-white/5">
-                <span className="inline-flex items-center gap-0.5">Behind% 4Wk<Sorter col="prBehindRate4Weeks" /></span>
-              </th>
-
-              {/* 8-Week PR */}
-              <TH col="prRequired8Weeks" label="Req 8Wk" />
-              <TH col="prCompleted8Weeks" label="Done 8Wk" />
-              <TH col="prBehind8Weeks" label="Behind 8Wk" />
-              <th onClick={() => handleSort("prBehindRate8Weeks")} className="px-3 py-2.5 text-[10px] text-white/40 uppercase tracking-wide font-semibold cursor-pointer hover:text-white/70 transition-colors whitespace-nowrap select-none border-r border-white/5">
-                <span className="inline-flex items-center gap-0.5">Behind% 8Wk<Sorter col="prBehindRate8Weeks" /></span>
-              </th>
-
-              {/* Overall PR */}
-              <TH col="prOverallRequired" label="Overall Req" />
-              <TH col="prOverallCompleted" label="Overall Done" />
-              <TH col="prOverallBehind" label="Overall Behind" />
-              <TH col="prOverallCompletionRate" label="Overall Rate" />
-            </tr>
-          </thead>
-
+      {/* Empty state */}
+      {records.length === 0 && (
+        <table className="data-table">
           <tbody>
-            {sorted.map((r, i) => (
-              <>
-                <tr
-                  key={r.id}
-                  onClick={() => setExpandedRow(expandedRow === r.id ? null : r.id)}
-                  className={`border-b border-white/[0.04] cursor-pointer transition-colors group ${
-                    i % 2 === 0 ? "bg-transparent" : "bg-white/[0.015]"
-                  } ${expandedRow === r.id ? "bg-[#7c4daa]/[0.06]" : ""}`}
-                >
-                  {/* Coach — sticky first column */}
-                  <td className={`px-3 py-3 whitespace-nowrap sticky left-0 z-10 ${expandedRow === r.id ? "bg-[#7c4daa]/[0.06]" : i % 2 === 0 ? "bg-[#111111]" : "bg-[#121212]"}`}>
-                    <span className="text-xs text-white/60 bg-white/5 px-2 py-0.5 rounded-full whitespace-nowrap">{r.coach}</span>
-                  </td>
-                  {/* Phone */}
-                  <td className="px-3 py-3 whitespace-nowrap border-r border-white/5"><Plain val={r.phone} dim /></td>
-
-                  {/* Last Sub Date */}
-                  <td className="px-3 py-3 whitespace-nowrap"><Plain val={r.lastSubDate} dim /></td>
-                  {/* Elapsed Days */}
-                  <td className="px-3 py-3 whitespace-nowrap">
-                    <Chip value={r.elapsedDays} good={3} warn={7} suffix="d" invert />
-                  </td>
-                  {/* Snapshot Date */}
-                  <td className="px-3 py-3 whitespace-nowrap border-r border-white/5"><Plain val={r.lastSnapshotDate} dim /></td>
-
-                  {/* Total Learners */}
-                  <td className="px-3 py-3 whitespace-nowrap text-center">
-                    <span className="text-xs font-mono text-[#c4b5fd] font-bold">{r.totalLearners}</span>
-                  </td>
-                  {/* Recent Submitters */}
-                  <td className="px-3 py-3 whitespace-nowrap text-center"><Plain val={r.recentSubmitters} /></td>
-                  {/* Engagement */}
-                  <td className="px-3 py-3 whitespace-nowrap border-r border-white/5">
-                    <Chip value={r.learnerEngagement} good={85} warn={70} suffix="%" />
-                  </td>
-
-                  {/* On Track */}
-                  <td className="px-3 py-3 whitespace-nowrap text-center">
-                    <span className="text-xs font-mono text-[#a8f0c6]">{r.otjhOnTrack}</span>
-                  </td>
-                  {/* Need Attention */}
-                  <td className="px-3 py-3 whitespace-nowrap text-center">
-                    <Chip value={r.otjhNeedAttention} good={7} warn={11} invert />
-                  </td>
-                  {/* At Risk */}
-                  <td className="px-3 py-3 whitespace-nowrap border-r border-white/5">
-                    <Chip value={r.otjhAtRisk} good={4} warn={7} invert />
-                  </td>
-
-                  {/* Last Week Pending */}
-                  <td className="px-3 py-3 whitespace-nowrap">
-                    <Chip value={r.lastWeekPending} good={8} warn={13} invert />
-                  </td>
-                  {/* Pending */}
-                  <td className="px-3 py-3 whitespace-nowrap">
-                    <Chip value={r.pending} good={12} warn={20} invert />
-                  </td>
-                  {/* Marking Weekly */}
-                  <td className="px-3 py-3 whitespace-nowrap border-r border-white/5">
-                    <span className="text-xs font-mono text-[#a8f0c6]">{formatMarkingProgressWeekly(getMarkingProgressWeekly(r))}</span>
-                  </td>
-
-                  {/* Referred Closure */}
-                  <td className="px-3 py-3 whitespace-nowrap text-center border-r border-white/5"><Plain val={r.referredClosure} /></td>
-
-
-                  {/* ── PR Weekly ── */}
-                  <td className="px-3 py-3 whitespace-nowrap text-center"><span className="text-xs font-mono text-white/70">{r.prLastWeek}</span></td>
-                  <td className="px-3 py-3 whitespace-nowrap text-center"><span className="text-xs font-mono text-white/50">{r.prSecondWeek}</span></td>
-                  <td className="px-3 py-3 whitespace-nowrap text-center"><span className="text-xs font-mono text-white/50">{r.prThirdWeek}</span></td>
-                  <td className="px-3 py-3 whitespace-nowrap text-center border-r border-white/5"><span className="text-xs font-mono text-white/50">{r.prFourthWeek}</span></td>
-
-                  {/* ── 4-Week PR ── */}
-                  <td className="px-3 py-3 whitespace-nowrap text-center"><span className="text-xs font-mono text-white/60">{r.prRequired4Weeks}</span></td>
-                  <td className="px-3 py-3 whitespace-nowrap text-center"><span className="text-xs font-mono text-[#a8f0c6]">{r.prCompleted4Weeks}</span></td>
-                  <td className="px-3 py-3 whitespace-nowrap border-r border-white/5"><Chip value={r.prBehindRate4Weeks} good={10} warn={30} suffix="%" invert /></td>
-
-                  {/* ── 8-Week PR ── */}
-                  <td className="px-3 py-3 whitespace-nowrap text-center"><span className="text-xs font-mono text-white/60">{r.prRequired8Weeks}</span></td>
-                  <td className="px-3 py-3 whitespace-nowrap text-center"><span className="text-xs font-mono text-[#a8f0c6]">{r.prCompleted8Weeks}</span></td>
-                  <td className="px-3 py-3 whitespace-nowrap text-center"><Chip value={r.prBehind8Weeks} good={20} warn={60} invert /></td>
-                  <td className="px-3 py-3 whitespace-nowrap border-r border-white/5"><Chip value={r.prBehindRate8Weeks} good={10} warn={30} suffix="%" invert /></td>
-
-                  {/* ── Overall PR ── */}
-                  <td className="px-3 py-3 whitespace-nowrap text-center"><span className="text-xs font-mono text-white/60">{r.prOverallRequired}</span></td>
-                  <td className="px-3 py-3 whitespace-nowrap text-center"><span className="text-xs font-mono text-[#a8f0c6]">{r.prOverallCompleted}</span></td>
-                  <td className="px-3 py-3 whitespace-nowrap"><Chip value={r.prOverallBehind} good={20} warn={80} invert /></td>
-                  <td className="px-3 py-3 whitespace-nowrap"><Chip value={r.prOverallCompletionRate} good={90} warn={70} suffix="%" /></td>
-                </tr>
-
-                {/* Expanded detail */}
-                {expandedRow === r.id && (
-                  <tr key={`exp-${r.id}`} className="bg-[#1a1a1a] border-b border-white/8">
-                    <td colSpan={33} className="px-6 py-4">
-                      <div className="flex items-start gap-6">
-                        <div className="shrink-0">
-                          <div className="w-10 h-10 rounded-full bg-[#7c4daa]/30 flex items-center justify-center">
-                            <span className="text-[#c4b5fd] text-sm font-black">
-                              {r.associate.split(" ").map((n) => n[0]).join("").slice(0, 2)}
-                            </span>
-                          </div>
-                        </div>
-                        <div className="flex-1 grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-4">
-                          {[
-                            { label: "Coach", value: r.coach },
-                            { label: "Phone", value: r.phone },
-                            { label: "Engagement", value: `${r.learnerEngagement}%` },
-                            { label: "OTJH On Track", value: r.otjhOnTrack },
-                            { label: "Closure Rate", value: `${r.referredClosurePct}%` },
-                            { label: "PR Today", value: r.prToday },
-                            { label: "Overall Done", value: r.prOverallCompleted },
-                            { label: "Overall Rate", value: `${r.prOverallCompletionRate}%` },
-                          ].map((item) => (
-                            <div key={item.label}>
-                              <p className="text-[9px] uppercase tracking-widest text-white/25 mb-0.5">{item.label}</p>
-                              <p className="text-white text-sm font-semibold">{item.value}</p>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </td>
-                  </tr>
-                )}
-              </>
-            ))}
-
-            {/* ── Totals row ── */}
-            {records.length > 0 && (
-              <tr className="border-t-2 border-[#7c4daa]/40 bg-[#7c4daa]/[0.05]">
-                <td className="px-3 py-3 sticky left-0 z-10 bg-[#0f0a18]">
-                  <span className="text-[#c4b5fd] text-xs font-black uppercase tracking-wide">Totals / Avg</span>
-                </td>
-                <td className="px-3 py-3 border-r border-white/5" />
-                {/* Activity cols blank */}
-                <td className="px-3 py-3" />
-                <td className="px-3 py-3" />
-                <td className="px-3 py-3 border-r border-white/5" />
-                {/* Learners totals */}
-                <td className="px-3 py-3 text-center"><span className="text-[#c4b5fd] font-mono text-xs font-bold">{totals.totalLearners}</span></td>
-                <td className="px-3 py-3 text-center"><span className="text-white/70 font-mono text-xs">{totals.recentSubmitters}</span></td>
-                <td className="px-3 py-3 border-r border-white/5">
-                  <Chip value={totals.learnerEngagement} good={85} warn={70} suffix="%" />
-                </td>
-                {/* OTJH totals */}
-                <td className="px-3 py-3 text-center"><span className="text-[#a8f0c6] font-mono text-xs">{totals.otjhOnTrack}</span></td>
-                <td className="px-3 py-3"><Chip value={totals.otjhNeedAttention} good={7} warn={11} invert /></td>
-                <td className="px-3 py-3 border-r border-white/5"><Chip value={totals.otjhAtRisk} good={4} warn={7} invert /></td>
-                {/* Pending totals */}
-                <td className="px-3 py-3"><Chip value={totals.lastWeekPending} good={8} warn={13} invert /></td>
-                <td className="px-3 py-3"><Chip value={totals.pending} good={12} warn={20} invert /></td>
-                <td className="px-3 py-3 border-r border-white/5"><span className="text-[#a8f0c6] font-mono text-xs">{formatMarkingProgressWeekly(totals.markingProgressWeekly)}</span></td>
-                {/* Evidence totals */}
-                <td className="px-3 py-3 text-center border-r border-white/5"><span className="text-white/70 font-mono text-xs">{totals.referredClosure}</span></td>
-                {/* PR Weekly totals */}
-                <td className="px-3 py-3 text-center"><span className="text-white/70 font-mono text-xs">{totals.prLastWeek}</span></td>
-                <td className="px-3 py-3 text-center"><span className="text-white/50 font-mono text-xs">{totals.prSecondWeek}</span></td>
-                <td className="px-3 py-3 text-center"><span className="text-white/50 font-mono text-xs">{totals.prThirdWeek}</span></td>
-                <td className="px-3 py-3 text-center border-r border-white/5"><span className="text-white/50 font-mono text-xs">{totals.prFourthWeek}</span></td>
-                {/* 4-Week totals */}
-                <td className="px-3 py-3 text-center"><span className="text-white/60 font-mono text-xs">{totals.prRequired4Weeks}</span></td>
-                <td className="px-3 py-3 text-center"><span className="text-[#a8f0c6] font-mono text-xs">{totals.prCompleted4Weeks}</span></td>
-                <td className="px-3 py-3 border-r border-white/5"><Chip value={totals.prBehindRate4Weeks} good={10} warn={30} suffix="%" invert /></td>
-                {/* 8-Week totals */}
-                <td className="px-3 py-3 text-center"><span className="text-white/60 font-mono text-xs">{totals.prRequired8Weeks}</span></td>
-                <td className="px-3 py-3 text-center"><span className="text-[#a8f0c6] font-mono text-xs">{totals.prCompleted8Weeks}</span></td>
-                <td className="px-3 py-3"><Chip value={totals.prBehind8Weeks} good={20} warn={60} invert /></td>
-                <td className="px-3 py-3 border-r border-white/5"><Chip value={totals.prBehindRate8Weeks} good={10} warn={30} suffix="%" invert /></td>
-                {/* Overall PR totals */}
-                <td className="px-3 py-3 text-center"><span className="text-white/60 font-mono text-xs">{totals.prOverallRequired}</span></td>
-                <td className="px-3 py-3 text-center"><span className="text-[#a8f0c6] font-mono text-xs">{totals.prOverallCompleted}</span></td>
-                <td className="px-3 py-3"><Chip value={totals.prOverallBehind} good={20} warn={80} invert /></td>
-                <td className="px-3 py-3"><Chip value={totals.prOverallCompletionRate} good={90} warn={70} suffix="%" /></td>
-              </tr>
-            )}
+            <tr className="table-empty">
+              <td colSpan={50}>
+                <div className="empty-state">
+                  <span className="empty-state-icon">📋</span>
+                  <p className="empty-state-title">No associates match these filters</p>
+                  <p className="empty-state-body">Try adjusting your search or clearing the active filters.</p>
+                </div>
+              </td>
+            </tr>
           </tbody>
         </table>
+      )}
+
+      {records.length > 0 && (
+        <div className="table-scroll themed-scrollbar">
+          <table className="data-table">
+            <thead>
+              {/* Group header row */}
+              <tr style={{ borderBottom: "1px solid var(--color-border)" }}>
+                <th scope="col" colSpan={2} style={{ background: "var(--color-canvas)", padding: "var(--space-2) var(--space-4)", fontSize: "var(--text-xs)", color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center" }}>Identity</th>
+                <th scope="col" colSpan={3} style={{ background: "var(--color-canvas)", padding: "var(--space-2) var(--space-4)", fontSize: "var(--text-xs)", color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center", borderLeft: "2px solid var(--color-border)" }}>Activity</th>
+                <th scope="col" colSpan={3} style={{ background: "var(--color-canvas)", padding: "var(--space-2) var(--space-4)", fontSize: "var(--text-xs)", color: "var(--color-accent)", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center", borderLeft: "2px solid var(--color-border)" }}>Learners</th>
+                <th scope="col" colSpan={3} style={{ background: "var(--color-canvas)", padding: "var(--space-2) var(--space-4)", fontSize: "var(--text-xs)", color: "var(--color-warning)", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center", borderLeft: "2px solid var(--color-border)" }}>OTJ Hours Risk</th>
+                <th scope="col" colSpan={3} style={{ background: "var(--color-canvas)", padding: "var(--space-2) var(--space-4)", fontSize: "var(--text-xs)", color: "var(--color-danger)", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center", borderLeft: "2px solid var(--color-border)" }}>Pending &amp; Marking</th>
+                <th scope="col" colSpan={10} style={{ background: "var(--color-canvas)", padding: "var(--space-2) var(--space-4)", fontSize: "var(--text-xs)", color: "var(--color-success)", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center", borderLeft: "2px solid var(--color-border)" }}>Evidence</th>
+                <th scope="col" colSpan={4} style={{ background: "var(--color-canvas)", padding: "var(--space-2) var(--space-4)", fontSize: "var(--text-xs)", color: "var(--color-info)", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center", borderLeft: "2px solid var(--color-border)" }}>PR Weekly</th>
+                <th scope="col" colSpan={3} style={{ background: "var(--color-canvas)", padding: "var(--space-2) var(--space-4)", fontSize: "var(--text-xs)", color: "var(--color-accent)", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center", borderLeft: "2px solid var(--color-border)" }}>4-Week PR</th>
+                <th scope="col" colSpan={4} style={{ background: "var(--color-canvas)", padding: "var(--space-2) var(--space-4)", fontSize: "var(--text-xs)", color: "var(--color-accent)", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center", borderLeft: "2px solid var(--color-border)" }}>8-Week PR</th>
+                <th scope="col" colSpan={4} style={{ background: "var(--color-canvas)", padding: "var(--space-2) var(--space-4)", fontSize: "var(--text-xs)", color: "var(--color-accent)", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center", borderLeft: "2px solid var(--color-border)" }}>12-Week PR</th>
+                <th scope="col" colSpan={3} style={{ background: "var(--color-canvas)", padding: "var(--space-2) var(--space-4)", fontSize: "var(--text-xs)", color: "var(--color-info)", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center", borderLeft: "2px solid var(--color-border)" }}>4-Week MCM</th>
+                <th scope="col" colSpan={4} style={{ background: "var(--color-canvas)", padding: "var(--space-2) var(--space-4)", fontSize: "var(--text-xs)", color: "var(--color-info)", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center", borderLeft: "2px solid var(--color-border)" }}>8-Week MCM</th>
+                <th scope="col" colSpan={4} style={{ background: "var(--color-canvas)", padding: "var(--space-2) var(--space-4)", fontSize: "var(--text-xs)", color: "var(--color-info)", textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center", borderLeft: "2px solid var(--color-border)" }}>12-Week MCM</th>
+              </tr>
+
+              {/* Column headers */}
+              <tr>
+                <th scope="col" onClick={() => handleSort("coach")} style={thStyle("coach", true)} aria-sort={sortKey === "coach" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>
+                  Coach <SortIcon col="coach" />
+                </th>
+                <th scope="col" style={{ ...thStyle("coach" as SortKey), borderRight: "2px solid var(--color-border)", cursor: "default" }}>Phone</th>
+
+                <th scope="col" onClick={() => handleSort("lastSubDate")} style={{ ...thStyle("lastSubDate"), borderLeft: "2px solid var(--color-border)" }} aria-sort={sortKey === "lastSubDate" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Last Sub <SortIcon col="lastSubDate" /></th>
+                <th scope="col" onClick={() => handleSort("elapsedDays")} style={thStyle("elapsedDays")} aria-sort={sortKey === "elapsedDays" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Elapsed <SortIcon col="elapsedDays" /></th>
+                <th scope="col" style={{ ...thStyle("coach" as SortKey), borderRight: "2px solid var(--color-border)", cursor: "default" }}>Snapshot</th>
+
+                <th scope="col" onClick={() => handleSort("totalLearners")} style={{ ...thStyle("totalLearners"), borderLeft: "2px solid var(--color-border)" }} aria-sort={sortKey === "totalLearners" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Total Learners <SortIcon col="totalLearners" /></th>
+                <th scope="col" onClick={() => handleSort("recentSubmitters")} style={thStyle("recentSubmitters")} aria-sort={sortKey === "recentSubmitters" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Recent Sub <SortIcon col="recentSubmitters" /></th>
+                <th scope="col" onClick={() => handleSort("learnerEngagement")} style={{ ...thStyle("learnerEngagement"), borderRight: "2px solid var(--color-border)" }} aria-sort={sortKey === "learnerEngagement" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Engagement <SortIcon col="learnerEngagement" /></th>
+
+                <th scope="col" onClick={() => handleSort("otjhOnTrack")} style={{ ...thStyle("otjhOnTrack"), borderLeft: "2px solid var(--color-border)" }} aria-sort={sortKey === "otjhOnTrack" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>On Track <SortIcon col="otjhOnTrack" /></th>
+                <th scope="col" onClick={() => handleSort("otjhNeedAttention")} style={thStyle("otjhNeedAttention")} aria-sort={sortKey === "otjhNeedAttention" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Attention <SortIcon col="otjhNeedAttention" /></th>
+                <th scope="col" onClick={() => handleSort("otjhAtRisk")} style={{ ...thStyle("otjhAtRisk"), borderRight: "2px solid var(--color-border)" }} aria-sort={sortKey === "otjhAtRisk" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>At Risk <SortIcon col="otjhAtRisk" /></th>
+
+                <th scope="col" onClick={() => handleSort("lastWeekPending")} style={{ ...thStyle("lastWeekPending"), borderLeft: "2px solid var(--color-border)" }} aria-sort={sortKey === "lastWeekPending" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Last Wk <SortIcon col="lastWeekPending" /></th>
+                <th scope="col" onClick={() => handleSort("pending")} style={thStyle("pending")} aria-sort={sortKey === "pending" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Pending <SortIcon col="pending" /></th>
+                <th scope="col" onClick={() => handleSort("markingProgressWeekly" as SortKey)} style={{ ...thStyle("markingProgressWeekly" as SortKey), borderRight: "2px solid var(--color-border)" }} aria-sort={sortKey === "markingProgressWeekly" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Marking Wkly <SortIcon col={"markingProgressWeekly" as SortKey} /></th>
+
+                <th scope="col" onClick={() => handleSort("referredClosure")} style={{ ...thStyle("referredClosure"), borderLeft: "2px solid var(--color-border)" }} aria-sort={sortKey === "referredClosure" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Ref Closure <SortIcon col="referredClosure" /></th>
+                <th scope="col" onClick={() => handleSort("evToday" as SortKey)} style={thStyle("evToday" as SortKey)} aria-sort={sortKey === "evToday" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Today <SortIcon col={"evToday" as SortKey} /></th>
+                <th scope="col" onClick={() => handleSort("evYesterday" as SortKey)} style={thStyle("evYesterday" as SortKey)} aria-sort={sortKey === "evYesterday" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Yesterday <SortIcon col={"evYesterday" as SortKey} /></th>
+                <th scope="col" onClick={() => handleSort("evMinus2" as SortKey)} style={thStyle("evMinus2" as SortKey)} aria-sort={sortKey === "evMinus2" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>-2 <SortIcon col={"evMinus2" as SortKey} /></th>
+                <th scope="col" onClick={() => handleSort("evMinus3" as SortKey)} style={thStyle("evMinus3" as SortKey)} aria-sort={sortKey === "evMinus3" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>-3 <SortIcon col={"evMinus3" as SortKey} /></th>
+                <th scope="col" onClick={() => handleSort("evMinus4" as SortKey)} style={thStyle("evMinus4" as SortKey)} aria-sort={sortKey === "evMinus4" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>-4 <SortIcon col={"evMinus4" as SortKey} /></th>
+                <th scope="col" onClick={() => handleSort("evMinus5" as SortKey)} style={thStyle("evMinus5" as SortKey)} aria-sort={sortKey === "evMinus5" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>-5 <SortIcon col={"evMinus5" as SortKey} /></th>
+                <th scope="col" onClick={() => handleSort("evMinus6" as SortKey)} style={thStyle("evMinus6" as SortKey)} aria-sort={sortKey === "evMinus6" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>-6 <SortIcon col={"evMinus6" as SortKey} /></th>
+                <th scope="col" onClick={() => handleSort("evMinus7" as SortKey)} style={thStyle("evMinus7" as SortKey)} aria-sort={sortKey === "evMinus7" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>-7 <SortIcon col={"evMinus7" as SortKey} /></th>
+                <th scope="col" onClick={() => handleSort("evidenceWeekTotal" as SortKey)} style={{ ...thStyle("evidenceWeekTotal" as SortKey), borderRight: "2px solid var(--color-border)" }} aria-sort={sortKey === "evidenceWeekTotal" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Week Total <SortIcon col={"evidenceWeekTotal" as SortKey} /></th>
+
+                <th scope="col" onClick={() => handleSort("prLastWeek")} style={{ ...thStyle("prLastWeek"), borderLeft: "2px solid var(--color-border)" }} aria-sort={sortKey === "prLastWeek" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Last Wk PR <SortIcon col="prLastWeek" /></th>
+                <th scope="col" onClick={() => handleSort("prSecondWeek")} style={thStyle("prSecondWeek")} aria-sort={sortKey === "prSecondWeek" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>-2nd Wk <SortIcon col="prSecondWeek" /></th>
+                <th scope="col" onClick={() => handleSort("prThirdWeek")} style={thStyle("prThirdWeek")} aria-sort={sortKey === "prThirdWeek" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>-3rd Wk <SortIcon col="prThirdWeek" /></th>
+                <th scope="col" onClick={() => handleSort("prFourthWeek")} style={{ ...thStyle("prFourthWeek"), borderRight: "2px solid var(--color-border)" }} aria-sort={sortKey === "prFourthWeek" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>-4th Wk <SortIcon col="prFourthWeek" /></th>
+
+                <th scope="col" onClick={() => handleSort("prRequired4Weeks")} style={{ ...thStyle("prRequired4Weeks"), borderLeft: "2px solid var(--color-border)" }} aria-sort={sortKey === "prRequired4Weeks" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Req 4Wk <SortIcon col="prRequired4Weeks" /></th>
+                <th scope="col" onClick={() => handleSort("prCompleted4Weeks")} style={thStyle("prCompleted4Weeks")} aria-sort={sortKey === "prCompleted4Weeks" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Done 4Wk <SortIcon col="prCompleted4Weeks" /></th>
+                <th scope="col" onClick={() => handleSort("prBehindRate4Weeks")} style={{ ...thStyle("prBehindRate4Weeks"), borderRight: "2px solid var(--color-border)" }} aria-sort={sortKey === "prBehindRate4Weeks" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Behind% 4Wk <SortIcon col="prBehindRate4Weeks" /></th>
+
+                <th scope="col" onClick={() => handleSort("prRequired8Weeks")} style={{ ...thStyle("prRequired8Weeks"), borderLeft: "2px solid var(--color-border)" }} aria-sort={sortKey === "prRequired8Weeks" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Req 8Wk <SortIcon col="prRequired8Weeks" /></th>
+                <th scope="col" onClick={() => handleSort("prCompleted8Weeks")} style={thStyle("prCompleted8Weeks")} aria-sort={sortKey === "prCompleted8Weeks" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Done 8Wk <SortIcon col="prCompleted8Weeks" /></th>
+                <th scope="col" onClick={() => handleSort("prBehind8Weeks")} style={thStyle("prBehind8Weeks")} aria-sort={sortKey === "prBehind8Weeks" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Behind 8Wk <SortIcon col="prBehind8Weeks" /></th>
+                <th scope="col" onClick={() => handleSort("prBehindRate8Weeks")} style={{ ...thStyle("prBehindRate8Weeks"), borderRight: "2px solid var(--color-border)" }} aria-sort={sortKey === "prBehindRate8Weeks" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Behind% 8Wk <SortIcon col="prBehindRate8Weeks" /></th>
+
+                <th scope="col" onClick={() => handleSort("prOverallRequired")} style={{ ...thStyle("prOverallRequired"), borderLeft: "2px solid var(--color-border)" }} aria-sort={sortKey === "prOverallRequired" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Req 12Wk <SortIcon col="prOverallRequired" /></th>
+                <th scope="col" onClick={() => handleSort("prOverallCompleted")} style={thStyle("prOverallCompleted")} aria-sort={sortKey === "prOverallCompleted" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Done 12Wk <SortIcon col="prOverallCompleted" /></th>
+                <th scope="col" onClick={() => handleSort("prOverallBehind")} style={thStyle("prOverallBehind")} aria-sort={sortKey === "prOverallBehind" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Behind <SortIcon col="prOverallBehind" /></th>
+                <th scope="col" onClick={() => handleSort("prOverallCompletionRate")} style={{ ...thStyle("prOverallCompletionRate"), borderRight: "2px solid var(--color-border)" }} aria-sort={sortKey === "prOverallCompletionRate" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Rate <SortIcon col="prOverallCompletionRate" /></th>
+
+                <th scope="col" onClick={() => handleSort("mcmRequired4Weeks" as SortKey)} style={{ ...thStyle("mcmRequired4Weeks" as SortKey), borderLeft: "2px solid var(--color-border)" }} aria-sort={sortKey === "mcmRequired4Weeks" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Req 4Wk <SortIcon col={"mcmRequired4Weeks" as SortKey} /></th>
+                <th scope="col" onClick={() => handleSort("mcmCompleted4Weeks" as SortKey)} style={thStyle("mcmCompleted4Weeks" as SortKey)} aria-sort={sortKey === "mcmCompleted4Weeks" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Done 4Wk <SortIcon col={"mcmCompleted4Weeks" as SortKey} /></th>
+                <th scope="col" onClick={() => handleSort("mcmBehindRate4Weeks" as SortKey)} style={{ ...thStyle("mcmBehindRate4Weeks" as SortKey), borderRight: "2px solid var(--color-border)" }} aria-sort={sortKey === "mcmBehindRate4Weeks" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Behind% 4Wk <SortIcon col={"mcmBehindRate4Weeks" as SortKey} /></th>
+
+                <th scope="col" onClick={() => handleSort("mcmRequired8Weeks" as SortKey)} style={{ ...thStyle("mcmRequired8Weeks" as SortKey), borderLeft: "2px solid var(--color-border)" }} aria-sort={sortKey === "mcmRequired8Weeks" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Req 8Wk <SortIcon col={"mcmRequired8Weeks" as SortKey} /></th>
+                <th scope="col" onClick={() => handleSort("mcmCompleted8Weeks" as SortKey)} style={thStyle("mcmCompleted8Weeks" as SortKey)} aria-sort={sortKey === "mcmCompleted8Weeks" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Done 8Wk <SortIcon col={"mcmCompleted8Weeks" as SortKey} /></th>
+                <th scope="col" onClick={() => handleSort("mcmBehind8Weeks" as SortKey)} style={thStyle("mcmBehind8Weeks" as SortKey)} aria-sort={sortKey === "mcmBehind8Weeks" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Behind 8Wk <SortIcon col={"mcmBehind8Weeks" as SortKey} /></th>
+                <th scope="col" onClick={() => handleSort("mcmBehindRate8Weeks" as SortKey)} style={{ ...thStyle("mcmBehindRate8Weeks" as SortKey), borderRight: "2px solid var(--color-border)" }} aria-sort={sortKey === "mcmBehindRate8Weeks" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Behind% 8Wk <SortIcon col={"mcmBehindRate8Weeks" as SortKey} /></th>
+
+                <th scope="col" onClick={() => handleSort("mcmRequired12Weeks" as SortKey)} style={{ ...thStyle("mcmRequired12Weeks" as SortKey), borderLeft: "2px solid var(--color-border)" }} aria-sort={sortKey === "mcmRequired12Weeks" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Req 12Wk <SortIcon col={"mcmRequired12Weeks" as SortKey} /></th>
+                <th scope="col" onClick={() => handleSort("mcmCompleted12Weeks" as SortKey)} style={thStyle("mcmCompleted12Weeks" as SortKey)} aria-sort={sortKey === "mcmCompleted12Weeks" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Done 12Wk <SortIcon col={"mcmCompleted12Weeks" as SortKey} /></th>
+                <th scope="col" onClick={() => handleSort("mcmBehind12Weeks" as SortKey)} style={thStyle("mcmBehind12Weeks" as SortKey)} aria-sort={sortKey === "mcmBehind12Weeks" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Behind <SortIcon col={"mcmBehind12Weeks" as SortKey} /></th>
+                <th scope="col" onClick={() => handleSort("mcmCompletionRate12Weeks" as SortKey)} style={thStyle("mcmCompletionRate12Weeks" as SortKey)} aria-sort={sortKey === "mcmCompletionRate12Weeks" ? (sortDir === "asc" ? "ascending" : "descending") : undefined}>Rate <SortIcon col={"mcmCompletionRate12Weeks" as SortKey} /></th>
+              </tr>
+            </thead>
+
+            <tbody>
+              {sorted.map((r, i) => (
+                  <tr
+                    key={r.id}
+                    onClick={() => onRowClick?.(r)}
+                    title="View learner breakdown"
+                    style={{
+                      cursor: "pointer",
+                      background: i % 2 === 0 ? "transparent" : "rgba(0,0,0,0.015)",
+                    }}
+                  >
+                    <th scope="row" style={{
+                      position: "sticky", left: 0, zIndex: 10,
+                      background: i % 2 === 0 ? "var(--color-surface)" : "var(--color-canvas)",
+                      padding: "var(--space-3) var(--space-4)",
+                      whiteSpace: "nowrap", fontWeight: "var(--font-medium)",
+                      color: "var(--color-text-primary)", fontSize: "var(--text-xs)",
+                      borderRight: "2px solid var(--color-border)",
+                    }}>
+                      {r.coach}
+                    </th>
+                    <td style={{ padding: "var(--space-3) var(--space-4)", borderRight: "2px solid var(--color-border)" }}><Num val={r.phone} dim /></td>
+
+                    <td style={{ padding: "var(--space-3) var(--space-4)", borderLeft: "2px solid var(--color-border)" }}><Num val={r.lastSubDate} dim /></td>
+                    <td style={{ padding: "var(--space-3) var(--space-4)" }}><Chip value={r.elapsedDays} good={3} warn={7} suffix="d" invert /></td>
+                    <td style={{ padding: "var(--space-3) var(--space-4)", borderRight: "2px solid var(--color-border)" }}><Num val={r.lastSnapshotDate} dim /></td>
+
+                    <td className="num" style={{ padding: "var(--space-3) var(--space-4)", borderLeft: "2px solid var(--color-border)" }}><Num val={r.totalLearners} /></td>
+                    <td className="num" style={{ padding: "var(--space-3) var(--space-4)" }}><Num val={r.recentSubmitters} /></td>
+                    <td style={{ padding: "var(--space-3) var(--space-4)", borderRight: "2px solid var(--color-border)" }}><Chip value={r.learnerEngagement} good={85} warn={70} suffix="%" /></td>
+
+                    <td className="num" style={{ padding: "var(--space-3) var(--space-4)", borderLeft: "2px solid var(--color-border)", color: "var(--color-success)" }}><Num val={r.otjhOnTrack} /></td>
+                    <td style={{ padding: "var(--space-3) var(--space-4)" }}><Chip value={r.otjhNeedAttention} good={7} warn={11} invert /></td>
+                    <td style={{ padding: "var(--space-3) var(--space-4)", borderRight: "2px solid var(--color-border)" }}><Chip value={r.otjhAtRisk} good={4} warn={7} invert /></td>
+
+                    <td style={{ padding: "var(--space-3) var(--space-4)", borderLeft: "2px solid var(--color-border)" }}><Chip value={r.lastWeekPending} good={8} warn={13} invert /></td>
+                    <td style={{ padding: "var(--space-3) var(--space-4)" }}><Chip value={r.pending} good={12} warn={20} invert /></td>
+                    <td style={{ padding: "var(--space-3) var(--space-4)", borderRight: "2px solid var(--color-border)" }}>
+                      <span className="tabular-nums" style={{ fontSize: "var(--text-xs)", color: "var(--color-success)" }}>
+                        {formatMarkingProgressWeekly(getMarkingProgressWeekly(r))}
+                      </span>
+                    </td>
+
+                    <td className="num" style={{ padding: "var(--space-3) var(--space-4)", borderLeft: "2px solid var(--color-border)" }}><Num val={r.referredClosure} /></td>
+                    <td className="num" style={{ padding: "var(--space-3) var(--space-4)" }}><Num val={r.evToday ?? 0} /></td>
+                    <td className="num" style={{ padding: "var(--space-3) var(--space-4)" }}><Num val={r.evYesterday ?? 0} dim /></td>
+                    <td className="num" style={{ padding: "var(--space-3) var(--space-4)" }}><Num val={r.evMinus2 ?? 0} dim /></td>
+                    <td className="num" style={{ padding: "var(--space-3) var(--space-4)" }}><Num val={r.evMinus3 ?? 0} dim /></td>
+                    <td className="num" style={{ padding: "var(--space-3) var(--space-4)" }}><Num val={r.evMinus4 ?? 0} dim /></td>
+                    <td className="num" style={{ padding: "var(--space-3) var(--space-4)" }}><Num val={r.evMinus5 ?? 0} dim /></td>
+                    <td className="num" style={{ padding: "var(--space-3) var(--space-4)" }}><Num val={r.evMinus6 ?? 0} dim /></td>
+                    <td className="num" style={{ padding: "var(--space-3) var(--space-4)" }}><Num val={r.evMinus7 ?? 0} dim /></td>
+                    <td className="num" style={{ padding: "var(--space-3) var(--space-4)", borderRight: "2px solid var(--color-border)", fontWeight: "var(--font-medium)" }}><Num val={r.evidenceWeekTotal ?? 0} /></td>
+
+                    <td className="num" style={{ padding: "var(--space-3) var(--space-4)", borderLeft: "2px solid var(--color-border)" }}><Num val={r.prLastWeek} /></td>
+                    <td className="num" style={{ padding: "var(--space-3) var(--space-4)" }}><Num val={r.prSecondWeek} dim /></td>
+                    <td className="num" style={{ padding: "var(--space-3) var(--space-4)" }}><Num val={r.prThirdWeek} dim /></td>
+                    <td className="num" style={{ padding: "var(--space-3) var(--space-4)", borderRight: "2px solid var(--color-border)" }}><Num val={r.prFourthWeek} dim /></td>
+
+                    <td className="num" style={{ padding: "var(--space-3) var(--space-4)", borderLeft: "2px solid var(--color-border)" }}><Num val={r.prRequired4Weeks} dim /></td>
+                    <td className="num" style={{ padding: "var(--space-3) var(--space-4)", color: "var(--color-success)" }}><Num val={r.prCompleted4Weeks} /></td>
+                    <td style={{ padding: "var(--space-3) var(--space-4)", borderRight: "2px solid var(--color-border)" }}><Chip value={r.prBehindRate4Weeks} good={10} warn={30} suffix="%" invert /></td>
+
+                    <td className="num" style={{ padding: "var(--space-3) var(--space-4)", borderLeft: "2px solid var(--color-border)" }}><Num val={r.prRequired8Weeks} dim /></td>
+                    <td className="num" style={{ padding: "var(--space-3) var(--space-4)", color: "var(--color-success)" }}><Num val={r.prCompleted8Weeks} /></td>
+                    <td style={{ padding: "var(--space-3) var(--space-4)" }}><Chip value={r.prBehind8Weeks} good={20} warn={60} invert /></td>
+                    <td style={{ padding: "var(--space-3) var(--space-4)", borderRight: "2px solid var(--color-border)" }}><Chip value={r.prBehindRate8Weeks} good={10} warn={30} suffix="%" invert /></td>
+
+                    <td className="num" style={{ padding: "var(--space-3) var(--space-4)", borderLeft: "2px solid var(--color-border)" }}><Num val={r.prOverallRequired} dim /></td>
+                    <td className="num" style={{ padding: "var(--space-3) var(--space-4)", color: "var(--color-success)" }}><Num val={r.prOverallCompleted} /></td>
+                    <td style={{ padding: "var(--space-3) var(--space-4)" }}><Chip value={r.prOverallBehind} good={20} warn={80} invert /></td>
+                    <td style={{ padding: "var(--space-3) var(--space-4)", borderRight: "2px solid var(--color-border)" }}><Chip value={r.prOverallCompletionRate} good={90} warn={70} suffix="%" /></td>
+
+                    <td className="num" style={{ padding: "var(--space-3) var(--space-4)", borderLeft: "2px solid var(--color-border)" }}><Num val={r.mcmRequired4Weeks ?? 0} dim /></td>
+                    <td className="num" style={{ padding: "var(--space-3) var(--space-4)", color: "var(--color-success)" }}><Num val={r.mcmCompleted4Weeks ?? 0} /></td>
+                    <td style={{ padding: "var(--space-3) var(--space-4)", borderRight: "2px solid var(--color-border)" }}><Chip value={r.mcmBehindRate4Weeks ?? 0} good={10} warn={30} suffix="%" invert /></td>
+
+                    <td className="num" style={{ padding: "var(--space-3) var(--space-4)", borderLeft: "2px solid var(--color-border)" }}><Num val={r.mcmRequired8Weeks ?? 0} dim /></td>
+                    <td className="num" style={{ padding: "var(--space-3) var(--space-4)", color: "var(--color-success)" }}><Num val={r.mcmCompleted8Weeks ?? 0} /></td>
+                    <td style={{ padding: "var(--space-3) var(--space-4)" }}><Chip value={r.mcmBehind8Weeks ?? 0} good={20} warn={60} invert /></td>
+                    <td style={{ padding: "var(--space-3) var(--space-4)", borderRight: "2px solid var(--color-border)" }}><Chip value={r.mcmBehindRate8Weeks ?? 0} good={10} warn={30} suffix="%" invert /></td>
+
+                    <td className="num" style={{ padding: "var(--space-3) var(--space-4)", borderLeft: "2px solid var(--color-border)" }}><Num val={r.mcmRequired12Weeks ?? 0} dim /></td>
+                    <td className="num" style={{ padding: "var(--space-3) var(--space-4)", color: "var(--color-success)" }}><Num val={r.mcmCompleted12Weeks ?? 0} /></td>
+                    <td style={{ padding: "var(--space-3) var(--space-4)" }}><Chip value={r.mcmBehind12Weeks ?? 0} good={20} warn={80} invert /></td>
+                    <td style={{ padding: "var(--space-3) var(--space-4)" }}><Chip value={r.mcmCompletionRate12Weeks ?? 0} good={90} warn={70} suffix="%" /></td>
+                  </tr>
+              ))}
+
+              {/* Totals row */}
+              {records.length > 0 && (
+                <tr style={{ borderTop: `2px solid var(--color-accent)`, background: "var(--color-accent-tint)" }}>
+                  <th scope="row" style={{
+                    position: "sticky", left: 0, zIndex: 10,
+                    background: "var(--color-accent-tint)",
+                    padding: "var(--space-3) var(--space-4)",
+                    fontWeight: "var(--font-semibold)", color: "var(--color-accent)",
+                    fontSize: "var(--text-xs)", textTransform: "uppercase", letterSpacing: "0.05em",
+                    borderRight: "2px solid var(--color-border)",
+                    whiteSpace: "nowrap",
+                  }}>
+                    Totals / Avg
+                  </th>
+                  <td style={{ padding: "var(--space-3) var(--space-4)", borderRight: "2px solid var(--color-border)" }} />
+                  <td style={{ padding: "var(--space-3) var(--space-4)", borderLeft: "2px solid var(--color-border)" }} />
+                  <td style={{ padding: "var(--space-3) var(--space-4)" }} />
+                  <td style={{ padding: "var(--space-3) var(--space-4)", borderRight: "2px solid var(--color-border)" }} />
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)", borderLeft: "2px solid var(--color-border)", fontWeight: "var(--font-semibold)", color: "var(--color-accent)" }}><Num val={totals.totalLearners} /></td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)" }}><Num val={totals.recentSubmitters} /></td>
+                  <td style={{ padding: "var(--space-3) var(--space-4)", borderRight: "2px solid var(--color-border)" }}><Chip value={totals.learnerEngagement} good={85} warn={70} suffix="%" /></td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)", borderLeft: "2px solid var(--color-border)", color: "var(--color-success)" }}><Num val={totals.otjhOnTrack} /></td>
+                  <td style={{ padding: "var(--space-3) var(--space-4)" }}><Chip value={totals.otjhNeedAttention} good={7} warn={11} invert /></td>
+                  <td style={{ padding: "var(--space-3) var(--space-4)", borderRight: "2px solid var(--color-border)" }}><Chip value={totals.otjhAtRisk} good={4} warn={7} invert /></td>
+                  <td style={{ padding: "var(--space-3) var(--space-4)", borderLeft: "2px solid var(--color-border)" }}><Chip value={totals.lastWeekPending} good={8} warn={13} invert /></td>
+                  <td style={{ padding: "var(--space-3) var(--space-4)" }}><Chip value={totals.pending} good={12} warn={20} invert /></td>
+                  <td style={{ padding: "var(--space-3) var(--space-4)", borderRight: "2px solid var(--color-border)", color: "var(--color-success)", fontSize: "var(--text-xs)" }} className="tabular-nums">{formatMarkingProgressWeekly(totals.markingProgressWeekly)}</td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)", borderLeft: "2px solid var(--color-border)" }}><Num val={totals.referredClosure} /></td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)" }}><Num val={totals.evToday} /></td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)" }}><Num val={totals.evYesterday} dim /></td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)" }}><Num val={totals.evMinus2} dim /></td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)" }}><Num val={totals.evMinus3} dim /></td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)" }}><Num val={totals.evMinus4} dim /></td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)" }}><Num val={totals.evMinus5} dim /></td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)" }}><Num val={totals.evMinus6} dim /></td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)" }}><Num val={totals.evMinus7} dim /></td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)", borderRight: "2px solid var(--color-border)", fontWeight: "var(--font-semibold)", color: "var(--color-accent)" }}><Num val={totals.evidenceWeekTotal} /></td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)", borderLeft: "2px solid var(--color-border)" }}><Num val={totals.prLastWeek} /></td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)" }}><Num val={totals.prSecondWeek} dim /></td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)" }}><Num val={totals.prThirdWeek} dim /></td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)", borderRight: "2px solid var(--color-border)" }}><Num val={totals.prFourthWeek} dim /></td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)", borderLeft: "2px solid var(--color-border)" }}><Num val={totals.prRequired4Weeks} dim /></td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)", color: "var(--color-success)" }}><Num val={totals.prCompleted4Weeks} /></td>
+                  <td style={{ padding: "var(--space-3) var(--space-4)", borderRight: "2px solid var(--color-border)" }}><Chip value={totals.prBehindRate4Weeks} good={10} warn={30} suffix="%" invert /></td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)", borderLeft: "2px solid var(--color-border)" }}><Num val={totals.prRequired8Weeks} dim /></td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)", color: "var(--color-success)" }}><Num val={totals.prCompleted8Weeks} /></td>
+                  <td style={{ padding: "var(--space-3) var(--space-4)" }}><Chip value={totals.prBehind8Weeks} good={20} warn={60} invert /></td>
+                  <td style={{ padding: "var(--space-3) var(--space-4)", borderRight: "2px solid var(--color-border)" }}><Chip value={totals.prBehindRate8Weeks} good={10} warn={30} suffix="%" invert /></td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)", borderLeft: "2px solid var(--color-border)" }}><Num val={totals.prOverallRequired} dim /></td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)", color: "var(--color-success)" }}><Num val={totals.prOverallCompleted} /></td>
+                  <td style={{ padding: "var(--space-3) var(--space-4)" }}><Chip value={totals.prOverallBehind} good={20} warn={80} invert /></td>
+                  <td style={{ padding: "var(--space-3) var(--space-4)", borderRight: "2px solid var(--color-border)" }}><Chip value={totals.prOverallCompletionRate} good={90} warn={70} suffix="%" /></td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)", borderLeft: "2px solid var(--color-border)" }}><Num val={totals.mcmRequired4Weeks} dim /></td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)", color: "var(--color-success)" }}><Num val={totals.mcmCompleted4Weeks} /></td>
+                  <td style={{ padding: "var(--space-3) var(--space-4)", borderRight: "2px solid var(--color-border)" }}><Chip value={behindPctOf(totals.mcmRequired4Weeks, totals.mcmCompleted4Weeks)} good={10} warn={30} suffix="%" invert /></td>
+
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)", borderLeft: "2px solid var(--color-border)" }}><Num val={totals.mcmRequired8Weeks} dim /></td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)", color: "var(--color-success)" }}><Num val={totals.mcmCompleted8Weeks} /></td>
+                  <td style={{ padding: "var(--space-3) var(--space-4)" }}><Chip value={Math.max(totals.mcmRequired8Weeks - totals.mcmCompleted8Weeks, 0)} good={20} warn={60} invert /></td>
+                  <td style={{ padding: "var(--space-3) var(--space-4)", borderRight: "2px solid var(--color-border)" }}><Chip value={behindPctOf(totals.mcmRequired8Weeks, totals.mcmCompleted8Weeks)} good={10} warn={30} suffix="%" invert /></td>
+
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)", borderLeft: "2px solid var(--color-border)" }}><Num val={totals.mcmRequired12Weeks} dim /></td>
+                  <td className="num" style={{ padding: "var(--space-3) var(--space-4)", color: "var(--color-success)" }}><Num val={totals.mcmCompleted12Weeks} /></td>
+                  <td style={{ padding: "var(--space-3) var(--space-4)" }}><Chip value={Math.max(totals.mcmRequired12Weeks - totals.mcmCompleted12Weeks, 0)} good={20} warn={80} invert /></td>
+                  <td style={{ padding: "var(--space-3) var(--space-4)" }}><Chip value={pctOf(totals.mcmCompleted12Weeks, totals.mcmRequired12Weeks)} good={90} warn={70} suffix="%" /></td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="table-footer">
+        <span>{records.length} associates</span>
+        <span>Click a row to see the learners behind the numbers</span>
       </div>
     </div>
   );

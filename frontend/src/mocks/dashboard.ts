@@ -3,6 +3,7 @@ export interface CoachRecord {
   associate: string;
   coach: string;
   caseOwner: string;
+  caseOwnerId?: number | null;
   phone: string;
   lastSubDate: string;
   elapsedDays: number;
@@ -41,4 +42,31 @@ export interface CoachRecord {
   prOverallCompleted: number;
   prOverallBehind: number;
   prOverallCompletionRate: number;
+  prRequired12Weeks?: number;
+  prCompleted12Weeks?: number;
+  prCompletionRate12Weeks?: number;
+  mcmRequired4Weeks?: number;
+  mcmCompleted4Weeks?: number;
+  mcmCompletionRate4Weeks?: number;
+  mcmBehind4Weeks?: number;
+  mcmBehindRate4Weeks?: number;
+  mcmRequired8Weeks?: number;
+  mcmCompleted8Weeks?: number;
+  mcmCompletionRate8Weeks?: number;
+  mcmBehind8Weeks?: number;
+  mcmBehindRate8Weeks?: number;
+  mcmRequired12Weeks?: number;
+  mcmCompleted12Weeks?: number;
+  mcmCompletionRate12Weeks?: number;
+  mcmBehind12Weeks?: number;
+  // Daily evidence submission buckets (from the Require Marking table).
+  evToday?: number;
+  evYesterday?: number;
+  evMinus2?: number;
+  evMinus3?: number;
+  evMinus4?: number;
+  evMinus5?: number;
+  evMinus6?: number;
+  evMinus7?: number;
+  evidenceWeekTotal?: number;
 }
