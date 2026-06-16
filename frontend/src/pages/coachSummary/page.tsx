@@ -1,12 +1,18 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import CoachSummaryTable from "./components/CoachSummaryTable";
 import CoachSummaryCharts from "./components/CoachSummaryCharts";
 import type { CoachSummaryRecord } from "@/mocks/coachSummary";
 import { fetchCoachSummary } from "@/services/coachSummary";
+import { fetchCoachesLateness } from "@/services/coachesLateness";
 import AppShell from "@/components/AppShell";
 
+const normalizeCoachName = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
+
 export default function CoachSummaryPage() {
+  const navigate = useNavigate();
   const [records, setRecords] = useState<CoachSummaryRecord[]>([]);
+  const [coachIdsByName, setCoachIdsByName] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -15,8 +21,26 @@ export default function CoachSummaryPage() {
       try {
         setLoading(true);
         setError(null);
-        const data = await fetchCoachSummary();
-        setRecords(data);
+        const [summaryResult, latenessResult] = await Promise.allSettled([
+          fetchCoachSummary(),
+          fetchCoachesLateness(),
+        ]);
+
+        if (summaryResult.status === "rejected") {
+          throw summaryResult.reason;
+        }
+
+        setRecords(summaryResult.value);
+
+        if (latenessResult.status === "fulfilled") {
+          const lookup = Object.fromEntries(
+            latenessResult.value.map((record) => [normalizeCoachName(record.coach), record.id]),
+          );
+          setCoachIdsByName(lookup);
+        } else {
+          console.error("Failed to load coaches lateness data for summary row navigation:", latenessResult.reason);
+          setCoachIdsByName({});
+        }
       } catch (err) {
         console.error('Failed to load coach summary data:', err);
         setError('Failed to load coach summary data from API.');
@@ -34,6 +58,12 @@ export default function CoachSummaryPage() {
   const avgAbsence = coaches.length > 0
     ? (coaches.reduce((s, c) => s + c.last10WeeksAbsenceRatio, 0) / coaches.length).toFixed(1)
     : "0.0";
+
+  const handleCoachSelect = (coachName: string) => {
+    const coachId = coachIdsByName[normalizeCoachName(coachName)];
+    if (coachId === undefined) return;
+    navigate(`/coach/${coachId}`);
+  };
 
   return (
     <>
@@ -126,7 +156,11 @@ export default function CoachSummaryPage() {
           </div>
 
           {/* Table */}
-          <CoachSummaryTable records={records} />
+          <CoachSummaryTable
+            records={records}
+            onCoachSelect={handleCoachSelect}
+            canSelectCoach={(coachName) => coachIdsByName[normalizeCoachName(coachName)] !== undefined}
+          />
 
           {/* Charts */}
           <CoachSummaryCharts records={records} />

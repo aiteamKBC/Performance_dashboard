@@ -1,6 +1,13 @@
+import type { KeyboardEvent } from "react";
 import { CoachSummaryRecord } from "@/mocks/coachSummary";
 
 const WEEKS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+
+interface CoachSummaryTableProps {
+  records: CoachSummaryRecord[];
+  onCoachSelect?: (coachName: string) => void;
+  canSelectCoach?: (coachName: string) => boolean;
+}
 
 function RatioBadge({ ratio, isOverall }: { ratio: number; isOverall?: boolean }) {
   const bg = ratio === 0 ? "var(--color-success-bg)"
@@ -30,13 +37,19 @@ function VsCompany({ vs }: { vs: number }) {
   );
 }
 
-export default function CoachSummaryTable({ records }: { records: CoachSummaryRecord[] }) {
+export default function CoachSummaryTable({ records, onCoachSelect, canSelectCoach }: CoachSummaryTableProps) {
   const overall = records.find(r => r.coachName === "OVERALL COMPANY");
   const coaches = records.filter(r => r.coachName !== "OVERALL COMPANY");
 
   const formatDate = (d: string) => {
     const [, m, day] = d.split("-");
     return `${day}/${m}`;
+  };
+
+  const handleRowKeyDown = (event: KeyboardEvent<HTMLTableRowElement>, coachName: string) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    onCoachSelect?.(coachName);
   };
 
   return (
@@ -100,9 +113,22 @@ export default function CoachSummaryTable({ records }: { records: CoachSummaryRe
             </tr>
           </thead>
           <tbody>
-            {coaches.map((row, idx) => (
-              <>
-                <tr key={row.coachName} style={{ background: idx % 2 === 0 ? "transparent" : "rgba(0,0,0,0.015)" }}>
+            {coaches.map((row, idx) => {
+              const clickable = Boolean(onCoachSelect && (canSelectCoach?.(row.coachName) ?? true));
+
+              return (
+                <tr
+                  key={row.coachName}
+                  onClick={clickable ? () => onCoachSelect?.(row.coachName) : undefined}
+                  onKeyDown={clickable ? (event) => handleRowKeyDown(event, row.coachName) : undefined}
+                  tabIndex={clickable ? 0 : undefined}
+                  role={clickable ? "button" : undefined}
+                  title={clickable ? `Open ${row.coachName} details` : undefined}
+                  style={{
+                    cursor: clickable ? "pointer" : "default",
+                    background: idx % 2 === 0 ? "transparent" : "rgba(0,0,0,0.015)",
+                  }}
+                >
                   <th scope="row" style={{
                     position: "sticky", left: 0, zIndex: 10,
                     background: idx % 2 === 0 ? "var(--color-surface)" : "var(--color-canvas)",
@@ -127,8 +153,8 @@ export default function CoachSummaryTable({ records }: { records: CoachSummaryRe
                     <RatioBadge ratio={row.last10WeeksAbsenceRatio} />
                   </td>
                 </tr>
-              </>
-            ))}
+              );
+            })}
 
             {/* Overall Company row */}
             {overall && (
