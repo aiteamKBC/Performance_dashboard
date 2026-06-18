@@ -1,55 +1,73 @@
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useEffect, useCallback } from "react";
 import CoachSummaryTable from "./components/CoachSummaryTable";
 import CoachSummaryCharts from "./components/CoachSummaryCharts";
+import CoachWeekDrawer, { type CoachWeekSelection } from "./components/CoachWeekDrawer";
 import type { CoachSummaryRecord } from "@/mocks/coachSummary";
-import { fetchCoachSummary } from "@/services/coachSummary";
-import { fetchCoachesLateness } from "@/services/coachesLateness";
+import { fetchAttendanceWeeks } from "@/services/attendance";
 import AppShell from "@/components/AppShell";
 
-const normalizeCoachName = (value: string) => value.trim().toLowerCase().replace(/\s+/g, " ");
+const WEEKS_PER_PAGE = 10;
 
 export default function CoachSummaryPage() {
-  const navigate = useNavigate();
   const [records, setRecords] = useState<CoachSummaryRecord[]>([]);
-  const [coachIdsByName, setCoachIdsByName] = useState<Record<string, number>>({});
+  const [selection, setSelection] = useState<CoachWeekSelection | null>(null);
   const [loading, setLoading] = useState(true);
+  const [paging, setPaging] = useState(false);
+  const [oldestWeekKey, setOldestWeekKey] = useState<string | null>(null);
+  const [newestWeekKey, setNewestWeekKey] = useState<string | null>(null);
+  const [hasOlder, setHasOlder] = useState(false);
+  const [hasNewer, setHasNewer] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const applyResult = useCallback((result: Awaited<ReturnType<typeof fetchAttendanceWeeks>>) => {
+    setRecords(result.records);
+    setOldestWeekKey(result.oldestWeekKey);
+    setNewestWeekKey(result.newestWeekKey);
+    setHasOlder(result.hasOlder);
+    setHasNewer(result.hasNewer);
+  }, []);
 
   useEffect(() => {
     const loadData = async () => {
       try {
         setLoading(true);
         setError(null);
-        const [summaryResult, latenessResult] = await Promise.allSettled([
-          fetchCoachSummary(),
-          fetchCoachesLateness(),
-        ]);
-
-        if (summaryResult.status === "rejected") {
-          throw summaryResult.reason;
-        }
-
-        setRecords(summaryResult.value);
-
-        if (latenessResult.status === "fulfilled") {
-          const lookup = Object.fromEntries(
-            latenessResult.value.map((record) => [normalizeCoachName(record.coach), record.id]),
-          );
-          setCoachIdsByName(lookup);
-        } else {
-          console.error("Failed to load coaches lateness data for summary row navigation:", latenessResult.reason);
-          setCoachIdsByName({});
-        }
+        applyResult(await fetchAttendanceWeeks(WEEKS_PER_PAGE));
       } catch (err) {
-        console.error('Failed to load coach summary data:', err);
-        setError('Failed to load coach summary data from API.');
+        console.error('Failed to load attendance data:', err);
+        setError('Failed to load attendance data from API.');
       } finally {
         setLoading(false);
       }
     };
     loadData();
-  }, []);
+  }, [applyResult]);
+
+  const goPrev = useCallback(async () => {
+    if (!oldestWeekKey || paging) return;
+    try {
+      setPaging(true);
+      applyResult(await fetchAttendanceWeeks(WEEKS_PER_PAGE, { before: oldestWeekKey }));
+    } catch (err) {
+      console.error('Failed to load older weeks:', err);
+      setError('Failed to load older weeks from API.');
+    } finally {
+      setPaging(false);
+    }
+  }, [oldestWeekKey, paging, applyResult]);
+
+  const goNext = useCallback(async () => {
+    if (!newestWeekKey || paging) return;
+    try {
+      setPaging(true);
+      applyResult(await fetchAttendanceWeeks(WEEKS_PER_PAGE, { after: newestWeekKey }));
+    } catch (err) {
+      console.error('Failed to load newer weeks:', err);
+      setError('Failed to load newer weeks from API.');
+    } finally {
+      setPaging(false);
+    }
+  }, [newestWeekKey, paging, applyResult]);
 
   const overall = records.find(r => r.coachName === "OVERALL COMPANY");
   const coaches = records.filter(r => r.coachName !== "OVERALL COMPANY");
@@ -59,10 +77,17 @@ export default function CoachSummaryPage() {
     ? (coaches.reduce((s, c) => s + c.last10WeeksAbsenceRatio, 0) / coaches.length).toFixed(1)
     : "0.0";
 
-  const handleCoachSelect = (coachName: string) => {
-    const coachId = coachIdsByName[normalizeCoachName(coachName)];
-    if (coachId === undefined) return;
-    navigate(`/coach/${coachId}`);
+  const handleWeekSelect = (coachName: string, weekIndex: number) => {
+    const record = records.find((r) => r.coachName === coachName);
+    const week = record?.weeks[weekIndex];
+    setSelection({
+      coachName,
+      year: week?.year,
+      weekNumber: week?.weekNumber,
+      label: week?.label,
+      weekStart: week?.weekStart,
+      weekEnd: week?.weekEnd,
+    });
   };
 
   return (
@@ -158,14 +183,20 @@ export default function CoachSummaryPage() {
           {/* Table */}
           <CoachSummaryTable
             records={records}
-            onCoachSelect={handleCoachSelect}
-            canSelectCoach={(coachName) => coachIdsByName[normalizeCoachName(coachName)] !== undefined}
+            onWeekSelect={handleWeekSelect}
+            onPrev={goPrev}
+            onNext={goNext}
+            canPrev={hasOlder}
+            canNext={hasNewer}
+            paging={paging}
           />
 
           {/* Charts */}
           <CoachSummaryCharts records={records} />
         </div>
       </AppShell>
+
+      <CoachWeekDrawer selection={selection} onClose={() => setSelection(null)} />
 
       <style>{`
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }

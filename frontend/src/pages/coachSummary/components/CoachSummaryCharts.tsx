@@ -21,8 +21,6 @@ const tooltipItemStyle = { color: "#6B7280" };
 const cursorStyle = { fill: "#EEF2FF" };
 const axisStyle = { fontSize: 10, fill: "#9CA3AF" };
 
-const weekLabels = ["W1", "W2", "W3", "W4", "W5", "W6", "W7", "W8", "W9", "W10"];
-
 const COACH_COLORS = [
   "var(--coach-summary-series-1)",
   "var(--coach-summary-series-2)",
@@ -54,13 +52,19 @@ export default function CoachSummaryCharts({ records }: { records: CoachSummaryR
     };
   });
 
-  const trendData = weekLabels.map((label, li) => {
-    const row: Record<string, string | number> = { week: label };
+  // Week labels come from the data (dynamic length). Chart oldest→newest so the
+  // trend reads left-to-right in time; the table column order is newest→oldest.
+  const weekCount = (overall ?? coaches[0])?.weeks.length ?? 0;
+  const weekOrder = Array.from({ length: weekCount }, (_, i) => weekCount - 1 - i);
+
+  const trendData = weekOrder.map((li) => {
+    const sample = (overall ?? coaches[0])?.weeks[li];
+    const row: Record<string, string | number> = { week: sample?.label ?? `W${li + 1}` };
     coachLineMeta.forEach((line) => {
-      row[line.key] = parseFloat(line.coach.weeks[li].absenceRatio.toFixed(2));
+      row[line.key] = parseFloat((line.coach.weeks[li]?.absenceRatio ?? 0).toFixed(2));
     });
     if (overall) {
-      row["Company"] = parseFloat(overall.weeks[li].absenceRatio.toFixed(2));
+      row["Company"] = parseFloat((overall.weeks[li]?.absenceRatio ?? 0).toFixed(2));
     }
     return row;
   });

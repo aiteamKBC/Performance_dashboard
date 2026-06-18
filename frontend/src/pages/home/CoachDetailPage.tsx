@@ -33,12 +33,23 @@ function statusPill(value: string) {
   );
 }
 
-function KpiCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
+function KpiCard({ label, value, sub, onClick }: { label: string; value: string | number; sub?: string; onClick?: () => void }) {
+  const clickable = Boolean(onClick);
   return (
-    <div style={{
-      background: "var(--color-surface)", border: "1px solid var(--color-border)",
-      borderRadius: "var(--radius-lg)", padding: "var(--space-4)", boxShadow: "var(--shadow-card)",
-    }}>
+    <div
+      onClick={onClick}
+      onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick?.(); } } : undefined}
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      title={clickable ? `View ${label} breakdown` : undefined}
+      className={clickable ? "kpi-card-clickable" : undefined}
+      style={{
+        background: "var(--color-surface)", border: "1px solid var(--color-border)",
+        borderRadius: "var(--radius-lg)", padding: "var(--space-4)", boxShadow: "var(--shadow-card)",
+        cursor: clickable ? "pointer" : "default",
+        transition: "transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease",
+      }}
+    >
       <p style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</p>
       <p className="tabular-nums" style={{ margin: "4px 0 0", fontSize: "var(--text-xl)", fontWeight: "var(--font-bold)", color: "var(--color-text-primary)" }}>{value}</p>
       {sub && <p style={{ margin: "2px 0 0", fontSize: "var(--text-xs)", color: "var(--color-text-secondary)" }}>{sub}</p>}
@@ -57,6 +68,18 @@ export default function CoachDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<LearnerSortKey>("name");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [highlightedSection, setHighlightedSection] = useState<string | null>(null);
+
+  // Scroll to a per-metric breakdown card and briefly highlight it.
+  const scrollToSection = (sectionKey: string) => {
+    const el = document.getElementById(`section-${sectionKey}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    setHighlightedSection(sectionKey);
+    window.setTimeout(() => {
+      setHighlightedSection((cur) => (cur === sectionKey ? null : cur));
+    }, 1600);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -214,14 +237,14 @@ export default function CoachDetailPage() {
 
             {/* KPI header */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: "var(--space-3)" }}>
-              <KpiCard label="Total Learners" value={record.totalLearners} />
-              <KpiCard label="Engagement" value={`${record.learnerEngagement}%`} sub={`${record.recentSubmitters} recent submitters`} />
-              <KpiCard label="OTJH At Risk" value={record.otjhAtRisk} sub={`${record.otjhNeedAttention} need attention`} />
-              <KpiCard label="PR 12-Week" value={`${record.prOverallCompletionRate}%`} sub={`${record.prOverallCompleted}/${record.prOverallRequired} completed`} />
-              <KpiCard label="Evidence Pending" value={record.pending} sub={`${record.referredClosure} referred closure`} />
-              <KpiCard label="MCM 4-Week" value={`${record.mcmCompletionRate4Weeks ?? 0}%`} sub={`${record.mcmCompleted4Weeks ?? 0}/${record.mcmRequired4Weeks ?? 0} completed`} />
-              <KpiCard label="MCM 8-Week" value={`${record.mcmCompletionRate8Weeks ?? 0}%`} sub={`${record.mcmCompleted8Weeks ?? 0}/${record.mcmRequired8Weeks ?? 0} completed`} />
-              <KpiCard label="MCM 12-Week" value={`${record.mcmCompletionRate12Weeks ?? 0}%`} sub={`${record.mcmCompleted12Weeks ?? 0}/${record.mcmRequired12Weeks ?? 0} completed`} />
+              <KpiCard label="Total Learners" value={record.totalLearners} onClick={() => scrollToSection("learners")} />
+              <KpiCard label="Engagement" value={`${record.learnerEngagement}%`} sub={`${record.recentSubmitters} recent submitters`} onClick={() => scrollToSection("recent_submitters")} />
+              <KpiCard label="OTJH At Risk" value={record.otjhAtRisk} sub={`${record.otjhNeedAttention} need attention`} onClick={() => scrollToSection("otjh_at_risk")} />
+              <KpiCard label="PR 12-Week" value={`${record.prOverallCompletionRate}%`} sub={`${record.prOverallCompleted}/${record.prOverallRequired} completed`} onClick={() => scrollToSection("pr_required")} />
+              <KpiCard label="Evidence Pending" value={record.pending} sub={`${record.referredClosure} referred closure`} onClick={() => scrollToSection("pending")} />
+              <KpiCard label="MCM 4-Week" value={`${record.mcmCompletionRate4Weeks ?? 0}%`} sub={`${record.mcmCompleted4Weeks ?? 0}/${record.mcmRequired4Weeks ?? 0} completed`} onClick={() => scrollToSection("mcm_completed")} />
+              <KpiCard label="MCM 8-Week" value={`${record.mcmCompletionRate8Weeks ?? 0}%`} sub={`${record.mcmCompleted8Weeks ?? 0}/${record.mcmRequired8Weeks ?? 0} completed`} onClick={() => scrollToSection("mcm_completed")} />
+              <KpiCard label="MCM 12-Week" value={`${record.mcmCompletionRate12Weeks ?? 0}%`} sub={`${record.mcmCompleted12Weeks ?? 0}/${record.mcmRequired12Weeks ?? 0} completed`} onClick={() => scrollToSection("mcm_required")} />
             </div>
 
             {/* Charts */}
@@ -343,7 +366,18 @@ export default function CoachDetailPage() {
             {drill && (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "var(--space-3)" }}>
                 {drill.sections.map((s) => (
-                  <div key={s.key} className="chart-card">
+                  <div
+                    key={s.key}
+                    id={`section-${s.key}`}
+                    className="chart-card"
+                    style={{
+                      scrollMarginTop: "var(--space-6)",
+                      transition: "box-shadow 0.3s ease, border-color 0.3s ease",
+                      ...(highlightedSection === s.key
+                        ? { boxShadow: "0 0 0 2px var(--color-accent)", borderColor: "var(--color-accent)" }
+                        : {}),
+                    }}
+                  >
                     <div className="chart-header">
                       <div>
                         <h3 className="chart-title">{s.label}</h3>
@@ -372,7 +406,18 @@ export default function CoachDetailPage() {
         )}
       </div>
 
-      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      <style>{`
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .kpi-card-clickable:hover {
+          transform: translateY(-2px);
+          box-shadow: var(--shadow-raised);
+          border-color: var(--color-accent);
+        }
+        .kpi-card-clickable:focus-visible {
+          outline: 2px solid var(--color-accent);
+          outline-offset: 2px;
+        }
+      `}</style>
     </AppShell>
   );
 }

@@ -559,13 +559,13 @@ def compute_coach_drill(coach_name=None, case_owner_id=None):
             recent_submitters.append({"name": full, "detail": last_sub.isoformat()})
 
     # ---- progress_review: PR completed / required this period -----------
-    pr_completed_4w, pr_required_12w = _review_drill(
+    pr_completed_4w, pr_required_12w, pr_completed_12w = _review_drill(
         "progress_review", "Review Planned Date", "Review Status", 16,
         name, cid, ranges, today
     )
 
     # ---- MCR: MCM completed (4w) / required (12w) ----------------------
-    mcm_completed_4w, mcm_required_12w = _review_drill(
+    mcm_completed_4w, mcm_required_12w, mcm_completed_12w = _review_drill(
         "MCR", "MCM", "Status", 22, name, cid, ranges, today, mcm=True
     )
 
@@ -588,8 +588,10 @@ def compute_coach_drill(coach_name=None, case_owner_id=None):
             section("referred_closure", "Referred Closure", closure_learners),
             section("recent_submitters", "Recent Submitters (30d)", recent_submitters),
             section("pr_completed", "PR Completed (last 4 weeks)", pr_completed_4w),
+            section("pr_completed_12w", "PR Completed (last 12 weeks)", pr_completed_12w),
             section("pr_required", "PR Required (last 12 weeks)", pr_required_12w),
             section("mcm_completed", "MCM Completed (last 4 weeks)", mcm_completed_4w),
+            section("mcm_completed_12w", "MCM Completed (last 12 weeks)", mcm_completed_12w),
             section("mcm_required", "MCM Required (last 12 weeks)", mcm_required_12w),
         ],
     }
@@ -727,7 +729,7 @@ def _compute_coach_learner_table(name, cid, today):
 
 
 def _review_drill(table, date_prefix, status_prefix, count, name, cid, ranges, today, mcm=False):
-    """Return (completed_4w, required_window) learner lists for a review table."""
+    """Return (completed_4w, required_12w, completed_12w) learner lists."""
     select_cols = ['"FullName"', '"Email"', '"CaseOwner"', 'case_owner_id', '"Status"']
     for i in range(1, count + 1):
         select_cols.append('"%s%d"' % (date_prefix, i))
@@ -740,8 +742,9 @@ def _review_drill(table, date_prefix, status_prefix, count, name, cid, ranges, t
 
     # No dedup: count each qualifying review slot, exactly as the row
     # aggregation does, so the drill totals match the numbers on the table.
-    # Both PR and MCM use 4-week "completed" and 12-week "required" windows.
-    completed_4w, required_window = [], []
+    # Both PR and MCM use 4-week "completed" and 12-week "required" windows;
+    # completed_12w is the completed reviews within the 12-week window.
+    completed_4w, required_window, completed_12w = [], [], []
     win_4w = ranges["4w"]
     win_long = ranges["12w"]
 
@@ -769,9 +772,12 @@ def _review_drill(table, date_prefix, status_prefix, count, name, cid, ranges, t
 
             if _in_range(planned, win_long):
                 required_window.append({"name": full, "detail": iso})
+                if is_done:
+                    completed_12w.append({"name": full, "detail": iso})
             if is_done and _in_range(planned, win_4w):
                 completed_4w.append({"name": full, "detail": iso})
 
     completed_4w.sort(key=lambda x: x["name"])
     required_window.sort(key=lambda x: x["name"])
-    return completed_4w, required_window
+    completed_12w.sort(key=lambda x: x["name"])
+    return completed_4w, required_window, completed_12w

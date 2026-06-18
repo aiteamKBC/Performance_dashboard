@@ -1,12 +1,17 @@
 import type { KeyboardEvent } from "react";
 import { CoachSummaryRecord } from "@/mocks/coachSummary";
 
-const WEEKS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
-
 interface CoachSummaryTableProps {
   records: CoachSummaryRecord[];
-  onCoachSelect?: (coachName: string) => void;
-  canSelectCoach?: (coachName: string) => boolean;
+  /** Open the drill for a given coach + week column (index into weeks[]). */
+  onWeekSelect?: (coachName: string, weekIndex: number) => void;
+  /** Page to the previous (older) window of weeks. */
+  onPrev?: () => void;
+  /** Page to the next (newer) window of weeks. */
+  onNext?: () => void;
+  canPrev?: boolean;
+  canNext?: boolean;
+  paging?: boolean;
 }
 
 function RatioBadge({ ratio, isOverall }: { ratio: number; isOverall?: boolean }) {
@@ -37,19 +42,32 @@ function VsCompany({ vs }: { vs: number }) {
   );
 }
 
-export default function CoachSummaryTable({ records, onCoachSelect, canSelectCoach }: CoachSummaryTableProps) {
+export default function CoachSummaryTable({ records, onWeekSelect, onPrev, onNext, canPrev, canNext, paging }: CoachSummaryTableProps) {
   const overall = records.find(r => r.coachName === "OVERALL COMPANY");
   const coaches = records.filter(r => r.coachName !== "OVERALL COMPANY");
 
+  // Week columns come from the data itself (dynamic, newest first).
+  const weekCount = overall?.weeks.length ?? coaches[0]?.weeks.length ?? 0;
+  const WEEKS = Array.from({ length: weekCount }, (_, i) => i);
+
   const formatDate = (d: string) => {
+    if (!d) return "";
     const [, m, day] = d.split("-");
     return `${day}/${m}`;
   };
 
-  const handleRowKeyDown = (event: KeyboardEvent<HTMLTableRowElement>, coachName: string) => {
+  // Weeks are newest-first: window spans the oldest week's start → newest week's end.
+  const sampleWeeks = (overall ?? coaches[0])?.weeks ?? [];
+  const newestWeek = sampleWeeks[0];
+  const oldestWeek = sampleWeeks[sampleWeeks.length - 1];
+  const rangeLabel = oldestWeek && newestWeek
+    ? `${formatDate(oldestWeek.weekStart)} – ${formatDate(newestWeek.weekEnd)}`
+    : "";
+
+  const handleCellKeyDown = (event: KeyboardEvent<HTMLTableCellElement>, coachName: string, weekIndex: number) => {
     if (event.key !== "Enter" && event.key !== " ") return;
     event.preventDefault();
-    onCoachSelect?.(coachName);
+    onWeekSelect?.(coachName, weekIndex);
   };
 
   return (
@@ -81,15 +99,15 @@ export default function CoachSummaryTable({ records, onCoachSelect, canSelectCoa
                 textAlign: "left",
               }}>Coach</th>
               <th scope="col" className="num">Students</th>
-              {WEEKS.map((w) => {
-                const sample = overall?.weeks[w - 1];
+              {WEEKS.map((wi) => {
+                const sample = (overall ?? coaches[0])?.weeks[wi];
                 return (
-                  <th key={w} scope="col" colSpan={2} style={{
+                  <th key={wi} scope="col" colSpan={2} style={{
                     textAlign: "center",
                     borderLeft: "2px solid var(--color-border)",
                     color: "var(--color-accent)",
                   }}>
-                    <div>W{w}</div>
+                    <div>{sample?.label ?? `W${wi + 1}`}</div>
                     {sample && (
                       <div style={{ fontWeight: "var(--font-normal)", color: "var(--color-text-muted)", fontSize: "var(--text-xs)" }}>
                         {formatDate(sample.weekStart)}–{formatDate(sample.weekEnd)}
@@ -98,15 +116,15 @@ export default function CoachSummaryTable({ records, onCoachSelect, canSelectCoa
                   </th>
                 );
               })}
-              <th scope="col" className="num" style={{ borderLeft: "2px solid var(--color-border)" }}>10W Avg</th>
+              <th scope="col" className="num" style={{ borderLeft: "2px solid var(--color-border)" }}>{weekCount}W Avg</th>
             </tr>
             <tr>
               <th scope="col" style={{ position: "sticky", left: 0, zIndex: 20, background: "var(--color-canvas)" }} />
               <th scope="col" className="num" style={{ color: "var(--color-text-muted)", fontWeight: "var(--font-normal)" }}>Count</th>
-              {WEEKS.map((w) => (
+              {WEEKS.map((wi) => (
                 <>
-                  <th key={`${w}-abs`} scope="col" style={{ textAlign: "center", borderLeft: "2px solid var(--color-border)", color: "var(--color-text-muted)", fontWeight: "var(--font-normal)" }}>Abs %</th>
-                  <th key={`${w}-cmp`} scope="col" style={{ textAlign: "center", color: "var(--color-text-muted)", fontWeight: "var(--font-normal)" }}>vs Co.</th>
+                  <th key={`${wi}-abs`} scope="col" style={{ textAlign: "center", borderLeft: "2px solid var(--color-border)", color: "var(--color-text-muted)", fontWeight: "var(--font-normal)" }}>Abs %</th>
+                  <th key={`${wi}-cmp`} scope="col" style={{ textAlign: "center", color: "var(--color-text-muted)", fontWeight: "var(--font-normal)" }}>vs Co.</th>
                 </>
               ))}
               <th scope="col" style={{ textAlign: "center", borderLeft: "2px solid var(--color-border)", color: "var(--color-text-muted)", fontWeight: "var(--font-normal)" }}>Abs %</th>
@@ -114,20 +132,12 @@ export default function CoachSummaryTable({ records, onCoachSelect, canSelectCoa
           </thead>
           <tbody>
             {coaches.map((row, idx) => {
-              const clickable = Boolean(onCoachSelect && (canSelectCoach?.(row.coachName) ?? true));
+              const clickable = Boolean(onWeekSelect);
 
               return (
                 <tr
                   key={row.coachName}
-                  onClick={clickable ? () => onCoachSelect?.(row.coachName) : undefined}
-                  onKeyDown={clickable ? (event) => handleRowKeyDown(event, row.coachName) : undefined}
-                  tabIndex={clickable ? 0 : undefined}
-                  role={clickable ? "button" : undefined}
-                  title={clickable ? `Open ${row.coachName} details` : undefined}
-                  style={{
-                    cursor: clickable ? "pointer" : "default",
-                    background: idx % 2 === 0 ? "transparent" : "rgba(0,0,0,0.015)",
-                  }}
+                  style={{ background: idx % 2 === 0 ? "transparent" : "rgba(0,0,0,0.015)" }}
                 >
                   <th scope="row" style={{
                     position: "sticky", left: 0, zIndex: 10,
@@ -141,7 +151,15 @@ export default function CoachSummaryTable({ records, onCoachSelect, canSelectCoa
                   <td className="num" style={{ padding: "var(--space-3) var(--space-4)" }}>{row.studentsCount}</td>
                   {row.weeks.map((w, wi) => (
                     <>
-                      <td key={`${wi}-abs`} style={{ padding: "var(--space-2) var(--space-3)", textAlign: "center", borderLeft: "2px solid var(--color-border)" }}>
+                      <td
+                        key={`${wi}-abs`}
+                        onClick={clickable ? () => onWeekSelect?.(row.coachName, wi) : undefined}
+                        onKeyDown={clickable ? (event) => handleCellKeyDown(event, row.coachName, wi) : undefined}
+                        tabIndex={clickable ? 0 : undefined}
+                        role={clickable ? "button" : undefined}
+                        title={clickable ? `View ${row.coachName} — ${w.label ?? `week ${wi + 1}`} attendance` : undefined}
+                        style={{ padding: "var(--space-2) var(--space-3)", textAlign: "center", borderLeft: "2px solid var(--color-border)", cursor: clickable ? "pointer" : "default" }}
+                      >
                         <RatioBadge ratio={w.absenceRatio} />
                       </td>
                       <td key={`${wi}-vs`} style={{ padding: "var(--space-2) var(--space-3)", textAlign: "center" }}>
@@ -189,9 +207,46 @@ export default function CoachSummaryTable({ records, onCoachSelect, canSelectCoa
         </table>
       </div>
 
-      <div className="table-footer">
-        <span>{coaches.length} coaches</span>
+      <div className="table-footer" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "var(--space-3)" }}>
+        <span>{coaches.length} coaches · {weekCount} weeks{rangeLabel ? ` · ${rangeLabel}` : ""}</span>
+        {(onPrev || onNext) && (
+          <div style={{ display: "inline-flex", alignItems: "center", gap: "var(--space-2)" }}>
+            <button
+              type="button"
+              onClick={onNext}
+              disabled={!canNext || paging}
+              title="Newer weeks"
+              style={pagingBtnStyle(!canNext || !!paging)}
+            >
+              <i className="ri-arrow-left-s-line" aria-hidden="true" />
+              Next
+            </button>
+            {paging && (
+              <i className="ri-loader-4-line" style={{ animation: "spin 1s linear infinite", color: "var(--color-accent)" }} aria-hidden="true" />
+            )}
+            <button
+              type="button"
+              onClick={onPrev}
+              disabled={!canPrev || paging}
+              title="Older weeks"
+              style={pagingBtnStyle(!canPrev || !!paging)}
+            >
+              Previous
+              <i className="ri-arrow-right-s-line" aria-hidden="true" />
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
+}
+
+function pagingBtnStyle(disabled: boolean) {
+  return {
+    display: "inline-flex", alignItems: "center", gap: "var(--space-1)",
+    border: "1px solid var(--color-border)", background: "var(--color-canvas)",
+    borderRadius: "var(--radius-md)", padding: "var(--space-1) var(--space-3)",
+    fontSize: "var(--text-xs)", color: "var(--color-text-secondary)",
+    cursor: disabled ? "default" : "pointer", opacity: disabled ? 0.45 : 1,
+  } as const;
 }

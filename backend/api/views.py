@@ -6,6 +6,7 @@ from rest_framework.response import Response
 from .models import CoachesLateness, CoachSummary
 from .serializers import CoachesLatenessSerializer, CoachSummarySerializer
 from .lateness_compute import compute_coaches_lateness, compute_coach_drill
+from .attendance_compute import get_attendance_weeks, get_attendance_drill
 
 class CoachesLatenessViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = CoachesLateness.objects.all()
@@ -33,6 +34,46 @@ class CoachDrillView(APIView):
 class CoachSummaryViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = CoachSummary.objects.all()
     serializer_class = CoachSummarySerializer
+
+
+class AttendanceWeeksView(APIView):
+    """Per-coach weekly absence ratios computed live from kbc_attendance.
+
+    Query params:
+      count  -> number of week columns (default 10)
+      before -> "year-week" key; return the weeks strictly older than it
+                (the table's "Previous" / older control).
+      after  -> "year-week" key; return the window one step newer than it
+                (the table's "Next" / newer control).
+    """
+    def get(self, request):
+        try:
+            count = int(request.query_params.get("count", 10))
+        except (TypeError, ValueError):
+            count = 10
+        count = max(1, min(count, 52))
+        before = request.query_params.get("before") or None
+        after = request.query_params.get("after") or None
+        return Response(get_attendance_weeks(count=count, before=before, after=after))
+
+
+class AttendanceDrillView(APIView):
+    """Per-student attended/absent breakdown for one coach in one week.
+
+    Query params: coach (required), year, week (default to the current week).
+    """
+    def get(self, request):
+        coach = request.query_params.get("coach")
+        year = request.query_params.get("year")
+        week = request.query_params.get("week")
+        if not coach:
+            return Response({"detail": "coach is required"}, status=400)
+        try:
+            year = int(year) if year is not None else None
+            week = int(week) if week is not None else None
+        except (TypeError, ValueError):
+            year = week = None
+        return Response(get_attendance_drill(coach, year=year, week=week))
 
 # Maps stripped+lowercased column name → safe API key
 _KPI_COLUMN_MAP = {
