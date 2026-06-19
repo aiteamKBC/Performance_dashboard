@@ -44,10 +44,20 @@ export interface DrillLearnerRow {
   mcm_date: string;
 }
 
+export interface ReviewRow {
+  name: string;
+  email: string;
+  programme: string;
+  metric: "PR" | "MCM";
+  status: string;
+  date: string;
+}
+
 export interface CoachDrill {
   coach: string;
   case_owner_id: number | null;
   per_learner: DrillLearnerRow[];
+  review_rows: ReviewRow[];
   sections: DrillSection[];
 }
 

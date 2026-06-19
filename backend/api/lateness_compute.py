@@ -574,10 +574,32 @@ def compute_coach_drill(coach_name=None, case_owner_id=None):
 
     per_learner = _compute_coach_learner_table(name, cid, today)
 
+    # Programme lookup (email -> programme, name -> programme) to enrich the
+    # per-review rows, since the review tables don't carry programme.
+    prog_by_email, prog_by_name = {}, {}
+    for r in per_learner:
+        if r.get("email"):
+            prog_by_email[_lower(r["email"])] = r.get("programme", "")
+        prog_by_name[_lower(r["name"])] = r.get("programme", "")
+
+    def _programme(email, full):
+        return prog_by_email.get(_lower(email)) or prog_by_name.get(_lower(full)) or ""
+
+    # One row per PR/MCM review slot (so the filterable Metric Breakdown table
+    # can show Completed/Scheduled/etc. per individual review, not just the
+    # learner's latest one).
+    review_rows = (
+        _review_rows("progress_review", "Review Planned Date", "Review Status", 16,
+                     name, cid, today, "PR", _programme)
+        + _review_rows("MCR", "MCM", "Status", 22,
+                       name, cid, today, "MCM", _programme, mcm=True)
+    )
+
     return {
         "coach": name,
         "case_owner_id": cid,
         "per_learner": per_learner,
+        "review_rows": review_rows,
         "sections": [
             section("learners", "Active Learners", sorted(learners, key=lambda x: x["name"])),
             section("engaged", "Engaged (has submitted)", sorted(engaged, key=lambda x: x["name"])),
@@ -789,3 +811,55 @@ def _review_drill(table, date_prefix, status_prefix, count, name, cid, ranges, t
     outstanding_window.sort(key=lambda x: x["name"])
     completed_12w.sort(key=lambda x: x["name"])
     return completed_4w, outstanding_window, completed_12w
+
+
+def _review_rows(table, date_prefix, status_prefix, count, name, cid, today,
+                 metric, programme_fn, mcm=False):
+    """
+    One row per individual PR/MCM review slot for the coach's active learners.
+
+    Each row: {name, email, programme, metric, status, date}. Personal Support
+    Plans and slots with no/unparseable date are skipped. ``status`` is the
+    classified category (Completed / Scheduled / Not Scheduled / In Progress).
+    """
+    select_cols = ['"FullName"', '"Email"', '"CaseOwner"', 'case_owner_id', '"Status"']
+    for i in range(1, count + 1):
+        select_cols.append('"%s%d"' % (date_prefix, i))
+        select_cols.append('"%s%d"' % (status_prefix, i))
+    if mcm:  # MCR has no case_owner_id column.
+        select_cols = [c for c in select_cols if c != "case_owner_id"]
+    sql = 'SELECT %s FROM "%s"' % (", ".join(select_cols), table)
+    rows = _fetch_dicts(sql)
+
+    out = []
+    for r in rows:
+        if _lower(r.get("Status")) != "active":
+            continue
+        if _is_alfanar(r.get("Email")):
+            continue
+        if not _owner_matches(r.get("CaseOwner"), r.get("case_owner_id"), name, cid):
+            continue
+        full = _clean(r.get("FullName")) or "Unknown Learner"
+        email = _clean(r.get("Email"))
+
+        for i in range(1, count + 1):
+            planned_raw = r.get("%s%d" % (date_prefix, i))
+            status_raw = r.get("%s%d" % (status_prefix, i))
+            if not _clean(planned_raw):
+                continue
+            if _is_personal_support_plan(planned_raw):
+                continue
+            planned = _parse_review_date(planned_raw)
+            if not planned:
+                continue
+            out.append({
+                "name": full,
+                "email": email,
+                "programme": programme_fn(email, full),
+                "metric": metric,
+                "status": _classify_status(status_raw),
+                "date": planned.isoformat(),
+            })
+
+    out.sort(key=lambda x: (x["name"], x["date"]))
+    return out

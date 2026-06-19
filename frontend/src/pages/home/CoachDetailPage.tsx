@@ -7,9 +7,10 @@ import {
 import type { CoachRecord } from "@/mocks/dashboard";
 import {
   fetchCoachesLateness, fetchCoachDrill,
-  type CoachDrill, type DrillLearnerRow,
+  type CoachDrill,
 } from "@/services/coachesLateness";
 import AppShell from "@/components/AppShell";
+import MetricBreakdownTable from "./components/MetricBreakdownTable";
 
 const STATUS_COLOR: Record<string, string> = {
   "On Track": "#16A34A",
@@ -20,18 +21,6 @@ const STATUS_COLOR: Record<string, string> = {
   "In Progress": "#4F46E5",
   "Not Scheduled": "#DC2626",
 };
-
-function statusPill(value: string) {
-  const color = STATUS_COLOR[value] ?? "var(--color-text-muted)";
-  if (!value) return <span style={{ color: "var(--color-text-muted)" }}>—</span>;
-  return (
-    <span style={{
-      display: "inline-block", padding: "1px 8px", borderRadius: 999,
-      fontSize: 11, fontWeight: 600, color, background: `${color}1a`,
-      whiteSpace: "nowrap",
-    }}>{value}</span>
-  );
-}
 
 function KpiCard({ label, value, sub, onClick }: { label: string; value: string | number; sub?: string; onClick?: () => void }) {
   const clickable = Boolean(onClick);
@@ -57,27 +46,27 @@ function KpiCard({ label, value, sub, onClick }: { label: string; value: string 
   );
 }
 
-type LearnerSortKey = keyof DrillLearnerRow;
-
 export default function CoachDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const [record, setRecord] = useState<CoachRecord | null>(null);
   const [drill, setDrill] = useState<CoachDrill | null>(null);
   const [loading, setLoading] = useState(true);
+  const [drillLoading, setDrillLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [sortKey, setSortKey] = useState<LearnerSortKey>("name");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [highlightedSection, setHighlightedSection] = useState<string | null>(null);
+  const [breakdownMetric, setBreakdownMetric] = useState<string>("ALL");
 
-  // Scroll to a per-metric breakdown card and briefly highlight it.
-  const scrollToSection = (sectionKey: string) => {
-    const el = document.getElementById(`section-${sectionKey}`);
+  // Scroll to the metric breakdown table, optionally pre-filtering by metric,
+  // and briefly highlight it.
+  const scrollToBreakdown = (metricKey: string) => {
+    setBreakdownMetric(metricKey);
+    const el = document.getElementById("metric-breakdown");
     if (!el) return;
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
-    setHighlightedSection(sectionKey);
+    el.scrollIntoView({ behavior: "smooth", block: "start" });
+    setHighlightedSection("metric-breakdown");
     window.setTimeout(() => {
-      setHighlightedSection((cur) => (cur === sectionKey ? null : cur));
+      setHighlightedSection((cur) => (cur === "metric-breakdown" ? null : cur));
     }, 1600);
   };
 
@@ -86,22 +75,37 @@ export default function CoachDetailPage() {
     const load = async () => {
       try {
         setLoading(true);
+        setDrillLoading(true);
         setError(null);
+        setDrill(null);
         const all = await fetchCoachesLateness();
         const rec = all.find((r) => String(r.id) === String(id)) ?? null;
         if (cancelled) return;
         setRecord(rec);
+        // Header/KPIs can render now; the learner detail loads separately.
+        setLoading(false);
         if (rec) {
-          const d = await fetchCoachDrill(rec.coach, rec.caseOwnerId);
-          if (!cancelled) setDrill(d);
+          try {
+            const d = await fetchCoachDrill(rec.coach, rec.caseOwnerId);
+            if (!cancelled) setDrill(d);
+          } catch (err) {
+            if (!cancelled) {
+              console.error("Failed to load coach learner detail:", err);
+              setError("Failed to load learner detail.");
+            }
+          } finally {
+            if (!cancelled) setDrillLoading(false);
+          }
+        } else {
+          setDrillLoading(false);
         }
       } catch (err) {
         if (!cancelled) {
           console.error("Failed to load coach detail:", err);
           setError("Failed to load coach details.");
+          setLoading(false);
+          setDrillLoading(false);
         }
-      } finally {
-        if (!cancelled) setLoading(false);
       }
     };
     load();
@@ -148,38 +152,6 @@ export default function CoachDetailPage() {
       { name: "-7", v: record.evMinus7 ?? 0 },
     ];
   }, [record]);
-
-  const sortedLearners = useMemo(() => {
-    if (!drill) return [];
-    const rows = [...drill.per_learner];
-    rows.sort((a, b) => {
-      const av = a[sortKey], bv = b[sortKey];
-      if (typeof av === "number" && typeof bv === "number") return sortDir === "asc" ? av - bv : bv - av;
-      return sortDir === "asc" ? String(av).localeCompare(String(bv)) : String(bv).localeCompare(String(av));
-    });
-    return rows;
-  }, [drill, sortKey, sortDir]);
-
-  const handleSort = (key: LearnerSortKey) => {
-    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    else { setSortKey(key); setSortDir("asc"); }
-  };
-
-  const headerCell = (key: LearnerSortKey, label: string) => (
-    <th
-      scope="col"
-      onClick={() => handleSort(key)}
-      style={{
-        cursor: "pointer", userSelect: "none", whiteSpace: "nowrap", textAlign: "left",
-        padding: "var(--space-2) var(--space-3)", fontSize: "var(--text-xs)",
-        color: sortKey === key ? "var(--color-accent)" : "var(--color-text-muted)",
-        background: "var(--color-canvas)",
-        textTransform: "uppercase", letterSpacing: "0.04em",
-      }}
-    >
-      {label}{sortKey === key ? (sortDir === "asc" ? " ▲" : " ▼") : ""}
-    </th>
-  );
 
   return (
     <AppShell
@@ -237,14 +209,14 @@ export default function CoachDetailPage() {
 
             {/* KPI header */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: "var(--space-3)" }}>
-              <KpiCard label="Total Learners" value={record.totalLearners} onClick={() => scrollToSection("learners")} />
-              <KpiCard label="Engagement" value={`${record.learnerEngagement}%`} sub={`${record.recentSubmitters} recent submitters`} onClick={() => scrollToSection("recent_submitters")} />
-              <KpiCard label="OTJH At Risk" value={record.otjhAtRisk} sub={`${record.otjhNeedAttention} need attention`} onClick={() => scrollToSection("otjh_at_risk")} />
-              <KpiCard label="PR 12-Week" value={`${record.prOverallCompletionRate}%`} sub={`${record.prOverallCompleted}/${record.prOverallRequired} completed`} onClick={() => scrollToSection("pr_required")} />
-              <KpiCard label="Evidence Pending" value={record.pending} sub={`${record.referredClosure} referred closure`} onClick={() => scrollToSection("pending")} />
-              <KpiCard label="MCM 4-Week" value={`${record.mcmCompletionRate4Weeks ?? 0}%`} sub={`${record.mcmCompleted4Weeks ?? 0}/${record.mcmRequired4Weeks ?? 0} completed`} onClick={() => scrollToSection("mcm_completed")} />
-              <KpiCard label="MCM 8-Week" value={`${record.mcmCompletionRate8Weeks ?? 0}%`} sub={`${record.mcmCompleted8Weeks ?? 0}/${record.mcmRequired8Weeks ?? 0} completed`} onClick={() => scrollToSection("mcm_completed")} />
-              <KpiCard label="MCM 12-Week" value={`${record.mcmCompletionRate12Weeks ?? 0}%`} sub={`${record.mcmCompleted12Weeks ?? 0}/${record.mcmRequired12Weeks ?? 0} completed`} onClick={() => scrollToSection("mcm_required")} />
+              <KpiCard label="Total Learners" value={record.totalLearners} onClick={() => scrollToBreakdown("ALL")} />
+              <KpiCard label="Engagement" value={`${record.learnerEngagement}%`} sub={`${record.recentSubmitters} recent submitters`} onClick={() => scrollToBreakdown("RECENT")} />
+              <KpiCard label="OTJH At Risk" value={record.otjhAtRisk} sub={`${record.otjhNeedAttention} need attention`} onClick={() => scrollToBreakdown("OTJH")} />
+              <KpiCard label="PR 12-Week" value={`${record.prOverallCompletionRate}%`} sub={`${record.prOverallCompleted}/${record.prOverallRequired} completed`} onClick={() => scrollToBreakdown("PR")} />
+              <KpiCard label="Evidence Pending" value={record.pending} sub={`${record.referredClosure} referred closure`} onClick={() => scrollToBreakdown("PENDING")} />
+              <KpiCard label="MCM 4-Week" value={`${record.mcmCompletionRate4Weeks ?? 0}%`} sub={`${record.mcmCompleted4Weeks ?? 0}/${record.mcmRequired4Weeks ?? 0} completed`} onClick={() => scrollToBreakdown("MCM")} />
+              <KpiCard label="MCM 8-Week" value={`${record.mcmCompletionRate8Weeks ?? 0}%`} sub={`${record.mcmCompleted8Weeks ?? 0}/${record.mcmRequired8Weeks ?? 0} completed`} onClick={() => scrollToBreakdown("MCM")} />
+              <KpiCard label="MCM 12-Week" value={`${record.mcmCompletionRate12Weeks ?? 0}%`} sub={`${record.mcmCompleted12Weeks ?? 0}/${record.mcmRequired12Weeks ?? 0} completed`} onClick={() => scrollToBreakdown("MCM")} />
             </div>
 
             {/* Charts */}
@@ -314,94 +286,32 @@ export default function CoachDetailPage() {
               </div>
             </div>
 
-            {/* Full learner table */}
-            <div className="table-card">
-              <div className="table-toolbar">
-                <h2 style={{ margin: 0, fontSize: "var(--text-md)", fontWeight: "var(--font-semibold)", color: "var(--color-text-primary)" }}>
-                  Learners ({drill?.per_learner.length ?? 0})
-                </h2>
-              </div>
-              <div className="table-scroll themed-scrollbar">
-                <table className="data-table">
-                  <thead>
-                    <tr>
-                      {headerCell("name", "Learner")}
-                      {headerCell("programme", "Programme")}
-                      {headerCell("otjh_status", "OTJH")}
-                      {headerCell("pending", "Pending")}
-                      {headerCell("referred_closure", "Ref Closure")}
-                      {headerCell("total_evidence", "Total Ev")}
-                      {headerCell("last_sub", "Last Sub")}
-                      {headerCell("pr_status", "PR Status")}
-                      {headerCell("pr_date", "PR Date")}
-                      {headerCell("mcm_status", "MCM Status")}
-                      {headerCell("mcm_date", "MCM Date")}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sortedLearners.map((l, i) => (
-                      <tr key={`${l.email}-${i}`} style={{ background: i % 2 === 0 ? "transparent" : "rgba(0,0,0,0.015)" }}>
-                        <th scope="row" style={{ padding: "var(--space-2) var(--space-3)", whiteSpace: "nowrap", fontWeight: "var(--font-medium)", color: "var(--color-text-primary)", fontSize: "var(--text-xs)" }}>
-                          {l.name}
-                          {l.email && <div style={{ fontSize: 10, color: "var(--color-text-muted)", fontWeight: 400 }}>{l.email}</div>}
-                        </th>
-                        <td style={{ padding: "var(--space-2) var(--space-3)", fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", whiteSpace: "nowrap" }}>{l.programme || "—"}</td>
-                        <td style={{ padding: "var(--space-2) var(--space-3)" }}>{statusPill(l.otjh_status)}</td>
-                        <td className="num tabular-nums" style={{ padding: "var(--space-2) var(--space-3)", fontSize: "var(--text-xs)" }}>{l.pending}</td>
-                        <td className="num tabular-nums" style={{ padding: "var(--space-2) var(--space-3)", fontSize: "var(--text-xs)" }}>{l.referred_closure}</td>
-                        <td className="num tabular-nums" style={{ padding: "var(--space-2) var(--space-3)", fontSize: "var(--text-xs)" }}>{l.total_evidence}</td>
-                        <td style={{ padding: "var(--space-2) var(--space-3)", fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", whiteSpace: "nowrap" }}>{l.last_sub || "—"}</td>
-                        <td style={{ padding: "var(--space-2) var(--space-3)" }}>{statusPill(l.pr_status)}</td>
-                        <td style={{ padding: "var(--space-2) var(--space-3)", fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", whiteSpace: "nowrap" }}>{l.pr_date || "—"}</td>
-                        <td style={{ padding: "var(--space-2) var(--space-3)" }}>{statusPill(l.mcm_status)}</td>
-                        <td style={{ padding: "var(--space-2) var(--space-3)", fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", whiteSpace: "nowrap" }}>{l.mcm_date || "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* Per-metric learner lists */}
-            {drill && (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "var(--space-3)" }}>
-                {drill.sections.map((s) => (
-                  <div
-                    key={s.key}
-                    id={`section-${s.key}`}
-                    className="chart-card"
-                    style={{
-                      scrollMarginTop: "var(--space-6)",
-                      transition: "box-shadow 0.3s ease, border-color 0.3s ease",
-                      ...(highlightedSection === s.key
-                        ? { boxShadow: "0 0 0 2px var(--color-accent)", borderColor: "var(--color-accent)" }
-                        : {}),
-                    }}
-                  >
-                    <div className="chart-header">
-                      <div>
-                        <h3 className="chart-title">{s.label}</h3>
-                        <p className="chart-subtitle">{s.count} learner{s.count === 1 ? "" : "s"}</p>
-                      </div>
-                    </div>
-                    <div className="chart-body" style={{ maxHeight: 220, overflowY: "auto" }}>
-                      {s.learners.length === 0 ? (
-                        <p style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>None</p>
-                      ) : (
-                        <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-                          {s.learners.map((l, i) => (
-                            <li key={`${l.name}-${i}`} style={{ display: "flex", justifyContent: "space-between", gap: "var(--space-2)", padding: "3px 0", fontSize: "var(--text-xs)", borderBottom: "1px solid var(--color-border)" }}>
-                              <span style={{ color: "var(--color-text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.name}</span>
-                              {l.detail && <span className="tabular-nums" style={{ color: "var(--color-text-muted)", flexShrink: 0 }}>{l.detail}</span>}
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  </div>
-                ))}
+            {/* Learner detail is fetched after the header/KPIs; show a loader
+                so we never display an empty "Learners (0)" mid-load. */}
+            {drillLoading && !drill && (
+              <div className="table-card" style={{ padding: "var(--space-8)", textAlign: "center", color: "var(--color-text-secondary)" }}>
+                <i className="ri-loader-4-line" style={{ fontSize: 28, color: "var(--color-accent)", animation: "spin 1s linear infinite" }} aria-hidden="true" />
+                <p style={{ marginTop: "var(--space-3)", fontSize: "var(--text-sm)" }}>Loading learner detail…</p>
               </div>
             )}
+
+            {/* Filterable per-learner metric breakdown */}
+            {drill && (
+              <div
+                id="metric-breakdown"
+                style={{
+                  scrollMarginTop: "var(--space-6)",
+                  transition: "box-shadow 0.3s ease, border-color 0.3s ease",
+                  borderRadius: "var(--radius-lg)",
+                  ...(highlightedSection === "metric-breakdown"
+                    ? { boxShadow: "0 0 0 2px var(--color-accent)" }
+                    : {}),
+                }}
+              >
+                <MetricBreakdownTable learners={drill.per_learner} reviewRows={drill.review_rows} initialMetric={breakdownMetric} />
+              </div>
+            )}
+
           </>
         )}
       </div>
