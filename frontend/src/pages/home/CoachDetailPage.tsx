@@ -221,12 +221,12 @@ export default function CoachDetailPage() {
 
             {/* Charts */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "var(--space-3)" }}>
-              <div className="chart-card">
+              <div className="chart-card" style={{ gridColumn: "span 2" }}>
                 <div className="chart-header"><div><h3 className="chart-title">OTJH Breakdown</h3></div></div>
                 <div className="chart-body">
-                  <ResponsiveContainer width="100%" height={200}>
+                  <ResponsiveContainer width="100%" height={280}>
                     <PieChart>
-                      <Pie data={otjhData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={70} label>
+                      <Pie data={otjhData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={95} label>
                         {otjhData.map((d) => <Cell key={d.name} fill={d.color} />)}
                       </Pie>
                       <Tooltip />
