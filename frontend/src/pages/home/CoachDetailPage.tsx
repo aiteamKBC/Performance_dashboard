@@ -18,6 +18,7 @@ const STATUS_COLOR: Record<string, string> = {
   "At Risk": "#DC2626",
   Completed: "#16A34A",
   Scheduled: "#0891B2",
+  "Awaiting Signature": "#EA580C",
   "In Progress": "#4F46E5",
   "Not Scheduled": "#DC2626",
 };
@@ -237,7 +238,7 @@ export default function CoachDetailPage() {
             {/* KPI header */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: "var(--space-3)" }}>
               <KpiCard label="Total Learners" value={record.totalLearners} onClick={() => scrollToBreakdown("ALL")} />
-              <KpiCard label="Engagement" value={`${record.learnerEngagement}%`} sub={`${record.recentSubmitters} recent submitters`} onClick={() => scrollToBreakdown("RECENT")} />
+              <KpiCard label="Learners Engagement" value={`${record.learnerEngagement}%`} sub={`${record.recentSubmitters} recent submitters`} onClick={() => scrollToBreakdown("RECENT")} />
               <KpiCard label="OTJH At Risk" value={record.otjhAtRisk} sub={`${record.otjhNeedAttention} need attention`} onClick={() => scrollToBreakdown("OTJH")} />
               <KpiCard label="PR 12-Week" value={`${record.prOverallCompletionRate}%`} sub={`${record.prOverallCompleted}/${record.prOverallRequired} completed`} onClick={() => scrollToBreakdown("PR")} />
               <KpiCard label="Evidence Pending" value={record.pending} sub={`${record.evidenceAccepted} accepted`} onClick={() => scrollToBreakdown("PENDING")} />
@@ -327,7 +328,7 @@ export default function CoachDetailPage() {
                     : {}),
                 }}
               >
-                <MetricBreakdownTable learners={drill.per_learner} reviewRows={drill.review_rows} initialMetric={breakdownMetric} />
+                <MetricBreakdownTable learners={drill.per_learner} reviewRows={drill.review_rows} initialMetric={breakdownMetric} coachName={record.coach} />
               </div>
             )}
 

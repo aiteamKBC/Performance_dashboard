@@ -87,7 +87,7 @@ def _classify_status(status_raw):
     if "completed" in text:
         return "Completed"
     if "awaiting signature" in text:
-        return "In Progress"
+        return "Awaiting Signature"
     if "notscheduled" in compact or ("not" in text and "scheduled" in text):
         return "Not Scheduled"
     if "scheduled" in text:
@@ -478,14 +478,25 @@ def compute_coaches_lateness():
 # --------------------------------------------------------------------------
 
 def _owner_matches(row_owner, row_owner_id, target_name, target_id):
-    """A learner belongs to the coach if either the name or the id matches."""
+    """A learner belongs to the coach when the owner *name* matches.
+
+    The numeric id is only a fallback for rows whose owner name is blank; it must
+    never override a present, differing name. When a learner is reassigned, the
+    new coach's name is written to their rows, but a stale ``case_owner_id`` (the
+    previous coach's id) can linger. Trusting that id ahead of the name leaks the
+    learner back into the old coach's drill — which is exactly how a reassigned
+    learner ends up showing under both coaches. Name-first matching prevents it.
+    """
+    row_name = _clean(row_owner)
+    if row_name:
+        return row_name.lower() == _clean(target_name).lower()
+    # Blank owner name on the row: fall back to the id, when both are present.
     if target_id is not None and row_owner_id is not None:
         try:
-            if int(row_owner_id) == int(target_id):
-                return True
+            return int(row_owner_id) == int(target_id)
         except (TypeError, ValueError):
-            pass
-    return _clean(row_owner).lower() == _clean(target_name).lower()
+            return False
+    return False
 
 
 def compute_coach_drill(coach_name=None, case_owner_id=None):
@@ -652,6 +663,7 @@ def _compute_coach_learner_table(name, cid, today):
     aptem = _fetch_dicts(
         'SELECT "FullName", "Email", "OwnerName", case_owner_id, "Program-Status", '
         '"OTJHoursStatus", "Submitted", "Completed", "Planned", "Minimum", '
+        '"Target", "Progress-Hours", "ProgressVariance", '
         '"Program Name" FROM aptem_auto_extracting'
     )
     for r in aptem:
@@ -672,6 +684,11 @@ def _compute_coach_learner_table(name, cid, today):
             "completed": float(r.get("Completed") or 0),
             "planned": float(r.get("Planned") or 0),
             "minimum": float(r.get("Minimum") or 0),
+            # OTJH detail columns (kept as raw text — Target / Progress-Hours /
+            # ProgressVariance are text in the source and may carry units/signs).
+            "otjh_target": _clean(r.get("Target")),
+            "otjh_progress_hours": _clean(r.get("Progress-Hours")),
+            "otjh_progress_variance": _clean(r.get("ProgressVariance")),
             "pending": 0,
             "referred_closure": 0,
             "total_evidence": 0,
@@ -820,7 +837,8 @@ def _review_rows(table, date_prefix, status_prefix, count, name, cid, today,
 
     Each row: {name, email, programme, metric, status, date}. Personal Support
     Plans and slots with no/unparseable date are skipped. ``status`` is the
-    classified category (Completed / Scheduled / Not Scheduled / In Progress).
+    classified category (Completed / Scheduled / Awaiting Signature /
+    Not Scheduled / In Progress).
     """
     select_cols = ['"FullName"', '"Email"', '"CaseOwner"', 'case_owner_id', '"Status"']
     for i in range(1, count + 1):

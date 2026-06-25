@@ -64,7 +64,8 @@ Raw status text is collapsed to one category by `_classify_status`:
 | Category | Matched when the (lowercased) status text… |
 |----------|---------------------------------------------|
 | `Completed` | contains `completed` |
-| `In Progress` | is empty, or contains `awaiting signature`, or matches nothing else below |
+| `Awaiting Signature` | contains `awaiting signature` |
+| `In Progress` | is empty, or matches nothing else below |
 | `Not Scheduled` | contains `notscheduled` / both `not` and `scheduled` |
 | `Scheduled` | contains `scheduled` (and not "not scheduled") |
 

@@ -34,6 +34,9 @@ export interface DrillLearnerRow {
   completed: number;
   planned: number;
   minimum: number;
+  otjh_target: string;
+  otjh_progress_hours: string;
+  otjh_progress_variance: string;
   pending: number;
   referred_closure: number;
   total_evidence: number;

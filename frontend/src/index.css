@@ -15,8 +15,13 @@
 
   /* TEXT */
   --color-text-primary:   #0F1629;
-  --color-text-secondary: #5A6480;
-  --color-text-muted:     #9AA3BB;
+  /* Sub / secondary / muted text is black site-wide (matches the primary
+     text-black so subtitles never read darker than the headings above them).
+     Non-text uses of the old light gray (input placeholders, scrollbar thumbs)
+     use --color-text-faint instead so they stay grey. */
+  --color-text-secondary: #0F1629;
+  --color-text-muted:     #0F1629;
+  --color-text-faint:     #9AA3BB;
   --color-text-inverse:   #F9FAFB;
 
   /* ACCENT — richer indigo-blue */
@@ -64,13 +69,13 @@
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
 
-  --text-xs:   11px;
-  --text-sm:   12px;
-  --text-base: 13px;
-  --text-md:   15px;
-  --text-lg:   20px;
-  --text-xl:   26px;
-  --text-2xl:  34px;
+  --text-xs:   12px;
+  --text-sm:   13px;
+  --text-base: 14px;
+  --text-md:   16px;
+  --text-lg:   22px;
+  --text-xl:   28px;
+  --text-2xl:  37px;
 
   --font-normal:   400;
   --font-medium:   500;
@@ -129,7 +134,7 @@
 
 html {
   height: 100%;
-  font-size: 14px;
+  font-size: 15px;
 }
 
 body {
@@ -557,7 +562,7 @@ p, li { line-height: var(--leading-normal); }
   min-width: 220px;
   transition: border-color 0.18s, box-shadow 0.18s;
 }
-.table-search::placeholder { color: var(--color-text-muted); }
+.table-search::placeholder { color: var(--color-text-faint); }
 .table-search:focus {
   border-color: var(--color-accent);
   box-shadow: 0 0 0 3px var(--color-accent-tint);
@@ -754,7 +759,7 @@ body::-webkit-scrollbar-track { background: var(--color-canvas); }
 html::-webkit-scrollbar-thumb,
 body::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 999px; }
 html::-webkit-scrollbar-thumb:hover,
-body::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); }
+body::-webkit-scrollbar-thumb:hover { background: var(--color-text-faint); }
 
 .themed-scrollbar {
   scrollbar-width: thin;
@@ -763,7 +768,7 @@ body::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); }
 .themed-scrollbar::-webkit-scrollbar { height: 6px; width: 6px; }
 .themed-scrollbar::-webkit-scrollbar-track { background: var(--color-canvas); border-radius: 999px; }
 .themed-scrollbar::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 999px; }
-.themed-scrollbar::-webkit-scrollbar-thumb:hover { background: var(--color-text-muted); }
+.themed-scrollbar::-webkit-scrollbar-thumb:hover { background: var(--color-text-faint); }
 
 /* Sidebar custom scrollbar */
 .sidebar::-webkit-scrollbar { width: 4px; }
