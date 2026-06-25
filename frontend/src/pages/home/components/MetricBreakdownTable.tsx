@@ -36,7 +36,13 @@ const METRICS = [
 
 const REVIEW_METRICS = new Set(["PR", "MCM"]);
 
-const STATUSES = ["Completed", "Scheduled", "Not Scheduled", "In Progress"];
+// Status options per metric. PR/MCM share the review statuses; OTJH filters by
+// its risk bands. Metrics not listed here have no status filter.
+const STATUS_OPTIONS: Record<string, string[]> = {
+  PR: ["Completed", "Scheduled", "Not Scheduled", "In Progress"],
+  MCM: ["Completed", "Scheduled", "Not Scheduled", "In Progress"],
+  OTJH: ["At Risk", "Need Attention", "On Track"],
+};
 
 const PERIODS = [
   { key: "ALL", label: "All dates", days: null },
@@ -138,24 +144,32 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
   const [status, setStatus] = useState("ALL");
   const [period, setPeriod] = useState("ALL");
 
-  // Follow the metric chosen by a KPI card click on the parent page.
-  useEffect(() => { setMetric(initialMetric); }, [initialMetric]);
+  // Follow the metric chosen by a KPI card click on the parent page, clearing
+  // any status/period that belonged to the previous metric.
+  useEffect(() => { setMetric(initialMetric); setStatus("ALL"); setPeriod("ALL"); }, [initialMetric]);
 
-  const reviewMode = REVIEW_METRICS.has(metric);
+  const changeMetric = (value: string) => {
+    setMetric(value);
+    setStatus("ALL");
+    setPeriod("ALL");
+  };
+
+  const reviewMode = REVIEW_METRICS.has(metric);          // time-period filter (dated rows only)
+  const statusOptions = STATUS_OPTIONS[metric] ?? [];     // status filter (PR/MCM/OTJH)
+  const statusMode = statusOptions.length > 0;
 
   const rows = useMemo(() => {
     const periodDays = PERIODS.find((p) => p.key === period)?.days ?? null;
     return allRows.filter((r) => {
       if (metric !== "ALL" && r.metricKey !== metric) return false;
       if (programme !== "ALL" && r.programme !== programme) return false;
-      // Status + period only constrain PR/MCM rows.
-      if (REVIEW_METRICS.has(r.metricKey)) {
-        if (reviewMode && status !== "ALL" && r.status !== status) return false;
-        if (reviewMode && periodDays != null && !withinDays(r.date, today, periodDays)) return false;
-      }
+      // Status filter applies to the selected metric (PR/MCM/OTJH).
+      if (statusMode && status !== "ALL" && r.status !== status) return false;
+      // Time period only constrains dated PR/MCM rows.
+      if (reviewMode && periodDays != null && !withinDays(r.date, today, periodDays)) return false;
       return true;
     });
-  }, [allRows, metric, programme, status, period, reviewMode, today]);
+  }, [allRows, metric, programme, status, period, statusMode, reviewMode, today]);
 
   return (
     <div className="table-card">
@@ -172,7 +186,7 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
         <div style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", gap: "var(--space-3)", alignItems: "flex-end" }}>
           <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
             Metric
-            <select value={metric} onChange={(e) => setMetric(e.target.value)} style={selectStyle}>
+            <select value={metric} onChange={(e) => changeMetric(e.target.value)} style={selectStyle}>
               {METRICS.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
             </select>
           </label>
@@ -185,23 +199,23 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
             </select>
           </label>
 
-          {reviewMode && (
-            <>
-              <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
-                Status
-                <select value={status} onChange={(e) => setStatus(e.target.value)} style={selectStyle}>
-                  <option value="ALL">All statuses</option>
-                  {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-                </select>
-              </label>
+          {statusMode && (
+            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
+              Status
+              <select value={status} onChange={(e) => setStatus(e.target.value)} style={selectStyle}>
+                <option value="ALL">All statuses</option>
+                {statusOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </label>
+          )}
 
-              <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
-                Time period
-                <select value={period} onChange={(e) => setPeriod(e.target.value)} style={selectStyle}>
-                  {PERIODS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
-                </select>
-              </label>
-            </>
+          {reviewMode && (
+            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
+              Time period
+              <select value={period} onChange={(e) => setPeriod(e.target.value)} style={selectStyle}>
+                {PERIODS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+              </select>
+            </label>
           )}
         </div>
       </div>

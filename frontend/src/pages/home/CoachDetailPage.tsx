@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
-  PieChart, Pie, Cell, Legend,
+  PieChart, Pie, Cell, Legend, LineChart, Line,
 } from "recharts";
 import type { CoachRecord } from "@/mocks/dashboard";
 import {
@@ -121,23 +121,50 @@ export default function CoachDetailPage() {
     ].filter((d) => d.value > 0);
   }, [record]);
 
-  const prData = useMemo(() => {
-    if (!record) return [];
-    return [
-      { name: "4-Week", Required: record.prRequired4Weeks, Completed: record.prCompleted4Weeks },
-      { name: "8-Week", Required: record.prRequired8Weeks, Completed: record.prCompleted8Weeks },
-      { name: "Overall", Required: record.prOverallRequired, Completed: record.prOverallCompleted },
-    ];
-  }, [record]);
+  // Monthly PR/MCM completion-rate trend, derived from the per-review rows in
+  // the drill response. Each review slot counts toward its planned month's
+  // "required"; a Completed status also counts toward "completed". This mirrors
+  // the backend window definition (rate = completed / planned-in-window), just
+  // bucketed by calendar month instead of by rolling 4/8/12-week windows. We
+  // cap to the trailing 6 months up to the current month (future-dated, not-yet-
+  // due reviews would otherwise drag the rate down artificially).
+  const completionTrend = useMemo(() => {
+    const rows = drill?.review_rows ?? [];
+    if (rows.length === 0) return [];
 
-  const mcmData = useMemo(() => {
-    if (!record) return [];
-    return [
-      { name: "4-Week", Required: record.mcmRequired4Weeks ?? 0, Completed: record.mcmCompleted4Weeks ?? 0 },
-      { name: "8-Week", Required: record.mcmRequired8Weeks ?? 0, Completed: record.mcmCompleted8Weeks ?? 0 },
-      { name: "12-Week", Required: record.mcmRequired12Weeks ?? 0, Completed: record.mcmCompleted12Weeks ?? 0 },
-    ];
-  }, [record]);
+    type Slot = { req: number; done: number };
+    const byMonth = new Map<string, { pr: Slot; mcm: Slot }>();
+    for (const r of rows) {
+      const ym = r.date?.slice(0, 7); // "YYYY-MM"
+      if (!ym || ym.length !== 7) continue;
+      let bucket = byMonth.get(ym);
+      if (!bucket) {
+        bucket = { pr: { req: 0, done: 0 }, mcm: { req: 0, done: 0 } };
+        byMonth.set(ym, bucket);
+      }
+      const slot = r.metric === "MCM" ? bucket.mcm : bucket.pr;
+      slot.req += 1;
+      if (r.status === "Completed") slot.done += 1;
+    }
+
+    const now = new Date();
+    const currentYm = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    const months = Array.from(byMonth.keys())
+      .filter((ym) => ym <= currentYm)
+      .sort()
+      .slice(-6);
+
+    const label = (ym: string) => {
+      const [y, m] = ym.split("-").map(Number);
+      return `${new Date(y, m - 1, 1).toLocaleString("en-US", { month: "short" })} '${String(y).slice(-2)}`;
+    };
+    const pct = (s: Slot) => (s.req > 0 ? Math.round((s.done / s.req) * 1000) / 10 : null);
+
+    return months.map((ym) => {
+      const b = byMonth.get(ym)!;
+      return { month: label(ym), PR: pct(b.pr), MCM: pct(b.mcm) };
+    });
+  }, [drill]);
 
   const evidenceData = useMemo(() => {
     if (!record) return [];
@@ -213,10 +240,9 @@ export default function CoachDetailPage() {
               <KpiCard label="Engagement" value={`${record.learnerEngagement}%`} sub={`${record.recentSubmitters} recent submitters`} onClick={() => scrollToBreakdown("RECENT")} />
               <KpiCard label="OTJH At Risk" value={record.otjhAtRisk} sub={`${record.otjhNeedAttention} need attention`} onClick={() => scrollToBreakdown("OTJH")} />
               <KpiCard label="PR 12-Week" value={`${record.prOverallCompletionRate}%`} sub={`${record.prOverallCompleted}/${record.prOverallRequired} completed`} onClick={() => scrollToBreakdown("PR")} />
-              <KpiCard label="Evidence Pending" value={record.pending} sub={`${record.referredClosure} referred closure`} onClick={() => scrollToBreakdown("PENDING")} />
+              <KpiCard label="Evidence Pending" value={record.pending} sub={`${record.evidenceAccepted} accepted`} onClick={() => scrollToBreakdown("PENDING")} />
+              <KpiCard label="Referred Closure" value={record.referredClosure} onClick={() => scrollToBreakdown("CLOSURE")} />
               <KpiCard label="MCM 4-Week" value={`${record.mcmCompletionRate4Weeks ?? 0}%`} sub={`${record.mcmCompleted4Weeks ?? 0}/${record.mcmRequired4Weeks ?? 0} completed`} onClick={() => scrollToBreakdown("MCM")} />
-              <KpiCard label="MCM 8-Week" value={`${record.mcmCompletionRate8Weeks ?? 0}%`} sub={`${record.mcmCompleted8Weeks ?? 0}/${record.mcmRequired8Weeks ?? 0} completed`} onClick={() => scrollToBreakdown("MCM")} />
-              <KpiCard label="MCM 12-Week" value={`${record.mcmCompletionRate12Weeks ?? 0}%`} sub={`${record.mcmCompleted12Weeks ?? 0}/${record.mcmRequired12Weeks ?? 0} completed`} onClick={() => scrollToBreakdown("MCM")} />
             </div>
 
             {/* Charts */}
@@ -236,37 +262,30 @@ export default function CoachDetailPage() {
                 </div>
               </div>
 
-              <div className="chart-card">
-                <div className="chart-header"><div><h3 className="chart-title">PR Required vs Completed</h3></div></div>
+              <div className="chart-card" style={{ gridColumn: "span 2" }}>
+                <div className="chart-header"><div><h3 className="chart-title">PR &amp; MCM Completion Rate (monthly trend)</h3></div></div>
                 <div className="chart-body">
-                  <ResponsiveContainer width="100%" height={200}>
-                    <BarChart data={prData} margin={{ top: 8, right: 8, left: -20, bottom: 4 }}>
-                      <CartesianGrid vertical={false} stroke="var(--color-border)" />
-                      <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#9CA3AF" }} />
-                      <YAxis tick={{ fontSize: 11, fill: "#9CA3AF" }} allowDecimals={false} />
-                      <Tooltip />
-                      <Legend wrapperStyle={{ fontSize: 11 }} />
-                      <Bar dataKey="Required" fill="#94A3B8" radius={[3, 3, 0, 0]} maxBarSize={28} />
-                      <Bar dataKey="Completed" fill="#16A34A" radius={[3, 3, 0, 0]} maxBarSize={28} />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              <div className="chart-card">
-                <div className="chart-header"><div><h3 className="chart-title">MCM Required vs Completed</h3></div></div>
-                <div className="chart-body">
-                  <ResponsiveContainer width="100%" height={200}>
-                    <BarChart data={mcmData} margin={{ top: 8, right: 8, left: -20, bottom: 4 }}>
-                      <CartesianGrid vertical={false} stroke="var(--color-border)" />
-                      <XAxis dataKey="name" tick={{ fontSize: 11, fill: "#9CA3AF" }} />
-                      <YAxis tick={{ fontSize: 11, fill: "#9CA3AF" }} allowDecimals={false} />
-                      <Tooltip />
-                      <Legend wrapperStyle={{ fontSize: 11 }} />
-                      <Bar dataKey="Required" fill="#94A3B8" radius={[3, 3, 0, 0]} maxBarSize={28} />
-                      <Bar dataKey="Completed" fill="#0891B2" radius={[3, 3, 0, 0]} maxBarSize={28} />
-                    </BarChart>
-                  </ResponsiveContainer>
+                  {drillLoading && !drill ? (
+                    <div style={{ height: 240, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--color-text-secondary)" }}>
+                      <i className="ri-loader-4-line" style={{ fontSize: 24, color: "var(--color-accent)", animation: "spin 1s linear infinite" }} aria-hidden="true" />
+                    </div>
+                  ) : completionTrend.length === 0 ? (
+                    <div style={{ height: 240, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--color-text-secondary)", fontSize: "var(--text-sm)" }}>
+                      No review data to chart.
+                    </div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={240}>
+                      <LineChart data={completionTrend} margin={{ top: 8, right: 12, left: -4, bottom: 4 }}>
+                        <CartesianGrid vertical={false} stroke="var(--color-border)" />
+                        <XAxis dataKey="month" tick={{ fontSize: 11, fill: "#9CA3AF" }} />
+                        <YAxis tick={{ fontSize: 11, fill: "#9CA3AF" }} domain={[0, 100]} tickFormatter={(v) => `${v}%`} width={44} />
+                        <Tooltip formatter={(value: number | null) => (value == null ? "—" : `${value}%`)} />
+                        <Legend wrapperStyle={{ fontSize: 11 }} />
+                        <Line type="monotone" dataKey="PR" name="PR" stroke="#16A34A" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                        <Line type="monotone" dataKey="MCM" name="MCM" stroke="#0891B2" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  )}
                 </div>
               </div>
 
