@@ -18,6 +18,7 @@ export default function CoachSummaryPage() {
   const [hasOlder, setHasOlder] = useState(false);
   const [hasNewer, setHasNewer] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showHighRisk, setShowHighRisk] = useState(false);
 
   const applyResult = useCallback((result: Awaited<ReturnType<typeof fetchAttendanceWeeks>>) => {
     setRecords(result.records);
@@ -71,7 +72,10 @@ export default function CoachSummaryPage() {
 
   const overall = records.find(r => r.coachName === "OVERALL COMPANY");
   const coaches = records.filter(r => r.coachName !== "OVERALL COMPANY");
-  const highRisk = coaches.filter(c => c.last10WeeksAbsenceRatio >= 20).length;
+  const highRiskCoaches = coaches
+    .filter(c => c.last10WeeksAbsenceRatio >= 20)
+    .sort((a, b) => b.last10WeeksAbsenceRatio - a.last10WeeksAbsenceRatio);
+  const highRisk = highRiskCoaches.length;
   const totalStudents = overall?.studentsCount ?? coaches.reduce((s, c) => s + c.studentsCount, 0);
   const avgAbsence = coaches.length > 0
     ? (coaches.reduce((s, c) => s + c.last10WeeksAbsenceRatio, 0) / coaches.length).toFixed(1)
@@ -141,28 +145,36 @@ export default function CoachSummaryPage() {
           <div className="page-heading-row">
             <div>
               <h2 style={{ margin: 0 }}>Absence Ratio Overview</h2>
-              <p style={{ margin: "var(--space-1) 0 0", color: "var(--color-text-secondary)", fontSize: "var(--text-sm)" }}>
-                Weekly absence ratios per coach across a 10-week rolling window
-              </p>
             </div>
           </div>
 
           {/* KPI hero row */}
           <div className="kpi-grid">
             {[
-              { label: "Total Coaches", value: coaches.length, icon: "ri-shield-user-line", status: null },
-              { label: "Total Students", value: totalStudents, icon: "ri-group-line", status: null },
+              { label: "Total Coaches", value: coaches.length, icon: "ri-shield-user-line", status: null, onClick: null },
+              { label: "Total Students", value: totalStudents, icon: "ri-group-line", status: null, onClick: null },
               { label: "Avg 10W Absence", value: `${avgAbsence}%`, icon: "ri-percent-line",
-                status: parseFloat(avgAbsence) >= 20 ? "kpi-status--danger" : parseFloat(avgAbsence) >= 15 ? "kpi-status--warning" : "kpi-status--success" },
-              { label: "Company W1 Absence", value: `${(overall?.weeks[0]?.absenceRatio || 0).toFixed(2)}%`, icon: "ri-building-line", status: null },
+                status: parseFloat(avgAbsence) >= 20 ? "kpi-status--danger" : parseFloat(avgAbsence) >= 15 ? "kpi-status--warning" : "kpi-status--success", onClick: null },
+              { label: "Company Last Week Absence", value: `${(overall?.weeks[0]?.absenceRatio || 0).toFixed(2)}%`, icon: "ri-building-line", status: null, onClick: null },
               { label: "High Risk Coaches (≥20%)", value: highRisk, icon: "ri-alarm-warning-line",
-                status: highRisk > 3 ? "kpi-status--danger" : highRisk > 1 ? "kpi-status--warning" : "kpi-status--success" },
+                status: highRisk > 3 ? "kpi-status--danger" : highRisk > 1 ? "kpi-status--warning" : "kpi-status--success",
+                onClick: highRisk > 0 ? () => setShowHighRisk(true) : null },
             ].map((s) => {
               const statusLabel = s.status === "kpi-status--danger" ? "⚠ High Risk"
-                : s.status === "kpi-status--warning" ? "△ Monitor"
+                : s.status === "kpi-status--warning" ? "△ Need Attention"
                 : s.status === "kpi-status--success" ? "✓ On Track" : null;
+              const clickable = Boolean(s.onClick);
               return (
-                <div key={s.label} className="kpi-card">
+                <div
+                  key={s.label}
+                  className={`kpi-card${clickable ? " kpi-card-clickable" : ""}`}
+                  onClick={s.onClick ?? undefined}
+                  onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); s.onClick?.(); } } : undefined}
+                  role={clickable ? "button" : undefined}
+                  tabIndex={clickable ? 0 : undefined}
+                  title={clickable ? "View high-risk coaches" : undefined}
+                  style={clickable ? { cursor: "pointer" } : undefined}
+                >
                   <div className="kpi-header">
                     <span className="kpi-label">{s.label}</span>
                     <i className={`${s.icon} kpi-info`} aria-hidden="true" />
@@ -198,8 +210,80 @@ export default function CoachSummaryPage() {
 
       <CoachWeekDrawer selection={selection} onClose={() => setSelection(null)} />
 
+      {showHighRisk && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="High risk coaches"
+          onClick={() => setShowHighRisk(false)}
+          style={{
+            position: "fixed", inset: 0, background: "rgba(15,22,41,0.45)",
+            display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60,
+            padding: "var(--space-4)",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "var(--color-surface)", border: "1px solid var(--color-border)",
+              borderRadius: "var(--radius-lg)", boxShadow: "var(--shadow-raised)",
+              width: "min(440px, 100%)", maxHeight: "80vh", display: "flex", flexDirection: "column",
+            }}
+          >
+            <div style={{
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+              padding: "var(--space-4)", borderBottom: "1px solid var(--color-border)",
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)" }}>
+                <i className="ri-alarm-warning-line" style={{ color: "var(--color-danger)", fontSize: 20 }} aria-hidden="true" />
+                <h3 style={{ margin: 0, fontSize: "var(--text-md)", fontWeight: "var(--font-semibold)" }}>
+                  High Risk Coaches (≥20%)
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowHighRisk(false)}
+                aria-label="Close"
+                style={{
+                  border: "none", background: "transparent", cursor: "pointer",
+                  color: "var(--color-text-secondary)", fontSize: 20, lineHeight: 1, padding: 4,
+                }}
+              >
+                <i className="ri-close-line" aria-hidden="true" />
+              </button>
+            </div>
+
+            <div className="themed-scrollbar" style={{ overflowY: "auto", padding: "var(--space-2) 0" }}>
+              {highRiskCoaches.length === 0 ? (
+                <p style={{ padding: "var(--space-4)", color: "var(--color-text-secondary)", fontSize: "var(--text-sm)" }}>
+                  No coaches are currently at high risk.
+                </p>
+              ) : (
+                highRiskCoaches.map((c) => (
+                  <div
+                    key={c.coachName}
+                    style={{
+                      display: "flex", alignItems: "center", justifyContent: "space-between",
+                      gap: "var(--space-3)", padding: "var(--space-2) var(--space-4)",
+                    }}
+                  >
+                    <span style={{ fontSize: "var(--text-sm)", color: "var(--color-text-primary)" }}>{c.coachName}</span>
+                    <span className="kpi-status kpi-status--danger" style={{ whiteSpace: "nowrap" }}>
+                      {c.last10WeeksAbsenceRatio.toFixed(1)}%
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <style>{`
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .kpi-card-clickable { transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease; }
+        .kpi-card-clickable:hover { transform: translateY(-2px); box-shadow: var(--shadow-raised); border-color: var(--color-accent); }
+        .kpi-card-clickable:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
       `}</style>
     </>
   );
