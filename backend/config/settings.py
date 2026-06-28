@@ -31,7 +31,7 @@ SECRET_KEY = 'django-insecure-6bg%@c2+5mal=^t#6=ct6q@tw37c2x9+@af8&%pdkvs0as++&_
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['performancedashboard.kentbusinesscollege.net']
 
 
 # Application definition
