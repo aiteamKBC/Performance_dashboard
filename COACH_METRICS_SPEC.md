@@ -253,6 +253,18 @@ For each qualifying slot, classify its status, then:
 So **`required` includes the completed ones** — it is "everything that was due in
 the window". **`outstanding = required − completed`.**
 
+> **Two windows are counted *per learner*, not per slot: PR 12-week and MCM
+> 4-week.** Every other window (PR 4w/8w, MCM 8w/12w) still counts each review
+> slot. For the per-learner windows — `pr_required_12_weeks` /
+> `pr_completed_12_weeks` (+ `overall_pr_*` aliases) and `mcm_required_4_weeks` /
+> `mcm_completed_4_weeks` (+ `required_mcm` / `completed_mcm` aliases) — a learner
+> is *required* if they had any review due in the window, and *completed* if they
+> **completed any** review due in the window. So a learner with three reviews in
+> the window contributes `1` to required, and `1` to completed if at least one of
+> the three is `Completed`. (The home-page charts and the coach-page PR/MCM cards
+> use the same per-learner counts across 4w/8w/12w/all via `pr_bylearner` /
+> `mcm_bylearner`.)
+
 ### 5.4 PR outputs (per coach)
 
 | Output | Definition |
@@ -261,8 +273,8 @@ the window". **`outstanding = required − completed`.**
 | `pr_completed_for_last_4_weeks` | completed slots due in 4w |
 | `total_pr_required_for_last_8_weeks` | slots due in 8w |
 | `pr_completed_for_last_8_weeks` | completed slots due in 8w |
-| `pr_required_12_weeks` / `overall_pr_required` | slots due in 12w |
-| `pr_completed_12_weeks` / `overall_pr_completed` | completed slots due in 12w |
+| `pr_required_12_weeks` / `overall_pr_required` | **learners** with a PR due in 12w (per learner, not per slot) |
+| `pr_completed_12_weeks` / `overall_pr_completed` | learners whose **most recent** PR due in 12w is completed |
 | `pr_completion_rate_12_weeks` / `overall_pr_completion_rate` | completion rate over 12w (see below) |
 | `pr_week_1..4_completed` | completed counts in weekly buckets w1..w4 |
 
@@ -298,7 +310,7 @@ window, and rate rules from [§5](#5--pr--progress-review) apply unchanged.
 
 | Output | Definition |
 |--------|------------|
-| `mcm_required_4_weeks`, `mcm_completed_4_weeks`, `mcm_completion_rate_4_weeks` | 4-week required / completed / rate |
+| `mcm_required_4_weeks`, `mcm_completed_4_weeks`, `mcm_completion_rate_4_weeks` | 4-week required / completed / rate — counted **per learner** (required = had an MCM due in the 4w window; completed = completed any of them), not per slot |
 | `mcm_required_8_weeks`, `mcm_completed_8_weeks`, `mcm_completion_rate_8_weeks` | 8-week |
 | `mcm_required_12_weeks`, `mcm_completed_12_weeks`, `mcm_completion_rate_12_weeks` | 12-week |
 | `required_mcm` / `completed_mcm` | aliases of the **4-week** numbers (legacy) |
@@ -356,6 +368,24 @@ delivered OTJ hours):
 
 Sum each tier across all coaches; `pct = round(tier / total * 100)` where
 `total = onTrack + needAttention + atRisk`.
+
+### 7.5 OTJH target (Metric Breakdown table)
+
+When **OTJH** is selected in the per-coach Metric Breakdown table, the **Target**
+column is **computed in the frontend** — it is *not* the source `Target` text
+column. It is the expected OTJ hours at this point in the programme, derived from
+the learner's completed hours and the signed progress deviation:
+
+```
+target = Completed − Progress-Hours
+```
+
+`Completed` is numeric hours. `Progress-Hours` is the signed deviation from
+expected, stored as an "Xh Ym" string (e.g. `-136h 8m`, `6h 57m`); it is parsed to
+decimal hours (sign preserved) before subtracting. Since `Progress-Hours =
+Completed − expected`, this recovers `expected`. Both `completed` and
+`otjh_progress_hours` already ship on each per-learner drill row, so no extra
+backend fields are needed. Unparseable progress strings yield a blank target.
 
 ---
 
@@ -415,74 +445,96 @@ snapshot of `pending` per coach** and diff against it.
 ## 9. Attendance / Absence
 
 **Source:** `kbc_attendance` ⋈ `kbc_users_data` (KBC DB). One attendance row =
-one student in one session. `Attendance` ∈ {1 = present, 0 = absent}; any other
-value is ignored ("anomalous").
+one student in one session. A session counts as **present** when `Attendance > 0`,
+otherwise (`0` or `NULL`) it's an **absence**. Counting is **per student per week**
+(see §9.2) — not per session row. This mirrors the n8n `Attendence.js` node.
 
-### 9.1 The week scheme — **day-of-year, NOT ISO week**
+**Reporting window & exclusions:**
+- "Today" (and therefore the visible weeks) is anchored to **Africa/Cairo** time.
+- The report starts at **`START_FROM = 2026-03-09`** (a Monday); earlier weeks are
+  hidden. The default view is the most recent **10** completed weeks.
+- Learners in the **excluded groups** (`kbc_users_data."Group"`, case-insensitive)
+  are dropped entirely: `pcp - november 2025 (alfanar)`, `me level 4 - january 2025`.
+- The in-progress week is hidden until it ends; matching n8n, it becomes visible on
+  its **Sunday** (otherwise the newest shown week is the previous completed one).
 
-This is deliberately *not* ISO weeks, so weeks are stable year over year:
+### 9.1 The week scheme — **ISO-8601 week (Monday–Sunday)**
+
+Weeks run **Monday→Sunday** and use the ISO calendar's `(year, week)`:
 
 ```
-week_number(d) = floor((day_of_year(d) − 1) / 7) + 1
-   week 1 = Jan 1–7, week 2 = Jan 8–14, …, week N = days [(N−1)*7+1 .. N*7]
+(iso_year, iso_week) = d.isocalendar()[:2]
+   each week is the 7 days Monday..Sunday; e.g. ISO 2026-W26 = Mon 22 Jun – Sun 28 Jun 2026.
 ```
 
-`week_bounds(year, week)`: `start = Jan 1 + (week−1)*7 days`, `end = start + 6
-days`, but the **final partial week is clamped to Dec 31** (so the last week of a
-year may be shorter than 7 days). Walking backward/forward across a year boundary
-uses the previous/next year's Dec-31 week index as the wrap point.
+`week_bounds(year, week)`: `start = date.fromisocalendar(year, week, 1)` (Monday),
+`end = date.fromisocalendar(year, week, 7)` (Sunday). Every week is a full 7 days;
+an ISO week may span a calendar-year boundary (e.g. 2026-W53 runs 28 Dec 2026 – 3
+Jan 2027). The number of ISO weeks in a year (52 or 53) is `date(y,12,28)`'s ISO
+week; walking backward/forward across a year boundary uses that as the wrap point.
+The **ISO year** in the `(year, week)` key can differ from the calendar year for
+dates in late December / early January.
 
-### 9.2 Per (coach, week) aggregation
+### 9.2 Per (coach, week) aggregation — **per student**
 
 Join attendance to the roster on `kbc_attendance."ID" = kbc_users_data."ID"`,
-restricted to the week's `[start, end]` date range and **active learners**
-(`lower(Program-Status) = 'active'`) with a non-blank `OwnerName`. Group by owner:
+restricted to the week's `[start, end]` range, **active learners**
+(`lower(Program-Status) = 'active'`) with a non-blank `OwnerName`, and **not** in
+an excluded group. First collapse to one row per **(owner, learner)** for the week:
 
-- `counted` = rows where `Attendance IN (0,1)`
-- `absent` = rows where `Attendance = 0`
-- `present` = rows where `Attendance = 1`
+- `attended = MAX(Attendance > 0)` over the learner's sessions that week — i.e. the
+  learner is present for the week if they attended **any** session.
+
+Then, per owner:
+
+- `total` = learners who had a session that week
+- `present` = learners who attended at least one session (`attended = 1`)
+- `absent` = learners who attended none (`attended = 0`)
+
+So `present + absent = total`, and a student with 5 sessions counts **once**.
 
 ### 9.3 The two ratios
 
 **Absence ratio** (the headline) =
-`round(absent / counted * 100, 2)`, `0.0` when `counted == 0`.
-This is the share of *that coach's counted session-rows* that were absences.
+`round(absent / total * 100, 2)`, `0.0` when `total == 0`.
+This is the share of *that coach's learners with sessions that week* who were
+absent (missed every session).
 
 **vs Company** =
 `round(coach_absent / company_absent * 100, 2)`, `0.0` when company has no
 absences. It is the coach's **share of all company absences that week**, so the
-company row is by definition `100%`. (It is *not* a ratio-of-ratios.)
-
-> Note both ratios are **session-row weighted**, not per-student — a student with
-> 5 sessions contributes 5 rows. A student counts only if they have at least one
-> counted session that week.
+company row is `100%` (or `0` when the company had no absences that week).
 
 ### 9.4 Company row
 
 `company_absent / company_present / company_total` = sums across all coaches that
-week; `company_ratio = round(company_absent / company_total * 100, 2)`.
+week (each learner has one owner, so summing = distinct learners company-wide);
+`company_ratio = round(company_absent / company_total * 100, 2)`.
 
-### 9.5 Window average
+### 9.5 Window ratio (pooled)
 
-For a multi-week table window, a coach's `windowAvgRatio` =
-`round(mean(per-week absence ratios over weeks present in the window), 2)`.
-(Weeks where the coach has no rows contribute `0.0` cells in the table but are
-excluded from the average — the average is over weeks where the coach actually
-had ratios.)
+For a multi-week table window, a coach's `windowAvgRatio` is **pooled**:
+`round(Σabsent / Σtotal over the window * 100, 2)` — matching the n8n
+`last_10_weeks_absence_ratio`. (It is *not* the mean of the weekly ratios.)
 
 ### 9.6 `students_count`
 
-Distinct active learners per coach: `COUNT(DISTINCT u."ID")` where
-`Program-Status = 'active'` and `OwnerName` non-blank.
+Distinct learners **who had any session in the displayed window** per coach:
+`COUNT(DISTINCT a."ID")` over the window's date range, with the §9.2 filters
+(active, real owner, not an excluded group). This is the learners actually seen in
+the window, not the full active roster.
 
 ### 9.7 Paging the week window
 
-- default: most recent `count` weeks (default 10), newest first.
+- **The in-progress week is hidden until it ends** — it becomes visible on its
+  **Sunday** (the last day); on any other day the newest shown week is the
+  previous completed one (Africa/Cairo `today`). (`latest_visible_week`.)
+- default: most recent `count` completed weeks (default 10), newest first.
 - `before = "year-week"`: the `count` weeks strictly **older** than that key.
 - `after = "year-week"`: the window of `count` weeks one step **newer**, never
-  past the current week.
-- `hasNewer` = newest shown week < current week; `hasOlder` = oldest shown week >
-  earliest week that has any attendance data.
+  past the most recent visible week.
+- `hasNewer` = newest shown week < latest visible week; `hasOlder` = oldest shown
+  week > `START_FROM`'s week (the report doesn't page earlier than 2026-03-09).
 
 ### 9.8 Per-student attendance drill (one coach, one week)
 
@@ -730,17 +782,23 @@ def rate(part):
 ### 15.2 Per (coach, week) absence (SQL shape)
 
 ```sql
-SELECT u."OwnerName" AS owner,
-       COUNT(*) FILTER (WHERE a."Attendance" IN (1,0)) AS counted,
-       COUNT(*) FILTER (WHERE a."Attendance" = 0)      AS absent,
-       COUNT(*) FILTER (WHERE a."Attendance" = 1)      AS present
-FROM kbc_attendance a
-JOIN kbc_users_data u ON u."ID" = a."ID"
-WHERE a.date BETWEEN :start AND :end
-  AND lower(u."Program-Status") = 'active'
-  AND u."OwnerName" IS NOT NULL AND u."OwnerName" <> ''
-GROUP BY u."OwnerName";
--- absence_ratio = round(absent/counted*100, 2)
+SELECT owner,
+       COUNT(*)                              AS total,    -- learners with a session
+       COUNT(*) FILTER (WHERE attended = 0)  AS absent,   -- attended none
+       COUNT(*) FILTER (WHERE attended = 1)  AS present   -- attended ≥1
+FROM (
+  SELECT u."OwnerName" AS owner, a."ID" AS sid,
+         MAX(CASE WHEN a."Attendance" > 0 THEN 1 ELSE 0 END) AS attended
+  FROM kbc_attendance a
+  JOIN kbc_users_data u ON u."ID" = a."ID"
+  WHERE a.date BETWEEN :start AND :end
+    AND lower(u."Program-Status") = 'active'
+    AND u."OwnerName" IS NOT NULL AND u."OwnerName" <> ''
+    AND NOT (lower(coalesce(u."Group",'')) = ANY(:excluded_groups))
+  GROUP BY u."OwnerName", a."ID"          -- collapse to one row per learner/week
+) per_learner
+GROUP BY owner;
+-- absence_ratio = round(absent/total*100, 2)        (per learner)
 -- vs_company    = round(coach_absent/company_absent*100, 2)
 ```
 
@@ -769,13 +827,20 @@ GROUP BY u."OwnerName";
    queries.
 9. **Marking Progress Weekly is not truly computed** (no prior snapshot) — it is
    forced to 0; persist a weekly `pending` snapshot to implement it.
-10. **Attendance weeks are day-of-year, not ISO.** Week 1 = Jan 1–7 always; the
-    last week of the year may be short (clamped to Dec 31).
-11. **Attendance ratios are session-row weighted**, not per-student.
-12. **EXCLUDE applies to PR/MCM/OTJH/Marking, not to attendance.**
-13. **The "2026 attendance" caveat:** because weeks are day-of-year and anchored
-    to the server's `today`, attendance windows depend on the server clock — a
-    wrong server year shifts every week bucket. Validate `today` in any rebuild.
+10. **Attendance weeks are ISO-8601 (Monday–Sunday).** The `(year, week)` key is
+    the ISO year and ISO week; an ISO week can straddle a calendar-year boundary
+    (e.g. 2026-W53 = 28 Dec 2026 – 3 Jan 2027). Every week is a full 7 days.
+11. **Attendance ratios are per-student per week**, not session-row weighted: a
+    learner counts once per week and is "absent" only if they attended **no**
+    session that week (`Attendance > 0` = present). Window ratio is pooled
+    (Σabsent/Σtotal), not a mean of weekly ratios.
+12. **Attendance has its own exclusions** (the PR/MCM/OTJH/Marking `EXCLUDE` set
+    does not apply): it drops learners in `EXCLUDED_GROUPS` and starts at
+    `START_FROM = 2026-03-09`, with "today" in **Africa/Cairo**.
+13. **The "2026 attendance" caveat:** because the visible weeks are anchored to
+    the server's `today` (current ISO week), attendance windows depend on the
+    server clock — a wrong server date shifts every week bucket. Validate `today`
+    in any rebuild.
 
 ---
 

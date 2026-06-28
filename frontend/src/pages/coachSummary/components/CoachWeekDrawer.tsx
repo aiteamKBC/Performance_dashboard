@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchAttendanceDrill, type AttendanceDrill } from "@/services/attendance";
+import { fetchAttendanceDrill, type AttendanceDrill, type AttendanceDrillLearner } from "@/services/attendance";
 
 export interface CoachWeekSelection {
   coachName: string;
@@ -31,6 +31,23 @@ const STATUS_STYLE: Record<string, { label: string; bg: string; color: string }>
   "no-session": { label: "No session", bg: "var(--color-canvas)", color: "var(--color-text-muted)" },
 };
 
+// Recorded-session groups are excluded from the attendance percentage & totals.
+function isRecordedGroup(group: string): boolean {
+  return group.toLowerCase().includes("recorded");
+}
+
+// Split the (already group-sorted) learners into contiguous group sections.
+function groupLearners(learners: AttendanceDrillLearner[]): { name: string; learners: AttendanceDrillLearner[] }[] {
+  const groups: { name: string; learners: AttendanceDrillLearner[] }[] = [];
+  for (const l of learners) {
+    const name = l.group || "No group";
+    const last = groups[groups.length - 1];
+    if (last && last.name === name) last.learners.push(l);
+    else groups.push({ name, learners: [l] });
+  }
+  return groups;
+}
+
 function StatusPill({ status, attended, absent }: { status: string; attended: number; absent: number }) {
   const s = STATUS_STYLE[status] ?? STATUS_STYLE["no-session"];
   const counted = attended + absent;
@@ -47,6 +64,14 @@ export default function CoachWeekDrawer({ selection, onClose }: CoachWeekDrawerP
   const [drill, setDrill] = useState<AttendanceDrill | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+
+  const toggleGroup = (name: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      next.has(name) ? next.delete(name) : next.add(name);
+      return next;
+    });
 
   useEffect(() => {
     if (!open || !selection) return;
@@ -54,9 +79,13 @@ export default function CoachWeekDrawer({ selection, onClose }: CoachWeekDrawerP
     setLoading(true);
     setError(null);
     setDrill(null);
+    setCollapsed(new Set());
     fetchAttendanceDrill(selection.coachName, selection.year, selection.weekNumber)
       .then((data) => {
-        if (!cancelled) setDrill(data);
+        if (cancelled) return;
+        setDrill(data);
+        // Start with every group collapsed; the user expands the ones they want.
+        setCollapsed(new Set(groupLearners(data.learners).map((g) => g.name)));
       })
       .catch((err) => {
         if (cancelled) return;
@@ -79,14 +108,17 @@ export default function CoachWeekDrawer({ selection, onClose }: CoachWeekDrawerP
 
   if (!open || !selection) return null;
 
-  const ratio = drill?.ratio ?? 0;
+  // Groups whose name contains "recorded" (e.g. recorded-session cohorts) are
+  // still listed, but excluded from the attendance/absence percentage and the
+  // attended/absent totals.
+  const counted = (drill?.learners ?? []).filter((l) => !isRecordedGroup(l.group));
+  const attendedStudents = counted.filter((l) => l.status === "attended" || l.status === "partial").length;
+  const absentStudents = counted.filter((l) => l.status === "absent").length;
+  const ratio = counted.length ? Math.round((absentStudents / counted.length) * 10000) / 100 : 0;
   const ratioColor = ratio === 0 ? "var(--color-success)"
     : ratio < 15 ? "var(--color-success)"
     : ratio < 25 ? "var(--color-warning)"
     : "var(--color-danger)";
-
-  const attendedStudents = drill?.learners.filter((l) => l.status === "attended").length ?? 0;
-  const absentStudents = drill?.learners.filter((l) => l.status === "absent" || l.status === "partial").length ?? 0;
   const rangeText = formatRange(
     drill?.weekStart ?? selection.weekStart,
     drill?.weekEnd ?? selection.weekEnd,
@@ -182,34 +214,66 @@ export default function CoachWeekDrawer({ selection, onClose }: CoachWeekDrawerP
                 Students
               </h3>
               <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
-                {drill.learners.length} active · absent first
+                {drill.learners.length} with attendance · by group · absent first
               </span>
             </div>
 
             {drill.learners.length === 0 ? (
-              <p style={{ fontSize: "var(--text-sm)", color: "var(--color-text-muted)" }}>No active learners for this coach.</p>
+              <p style={{ fontSize: "var(--text-sm)", color: "var(--color-text-muted)" }}>No attendance records for this coach this week.</p>
             ) : (
-              <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
-                {drill.learners.map((l) => (
-                  <li
-                    key={l.id}
-                    title={l.sessions.map((s) => `${s.date}: ${s.status}${s.module ? ` (${s.module})` : ""}`).join("\n") || "No session this week"}
+              groupLearners(drill.learners).map((g) => {
+                const isCollapsed = collapsed.has(g.name);
+                const attendedInGroup = g.learners.filter((l) => l.status === "attended" || l.status === "partial").length;
+                const recorded = isRecordedGroup(g.name);
+                return (
+                <div key={g.name} style={{ marginBottom: "var(--space-3)" }}>
+                  <button
+                    type="button"
+                    onClick={() => toggleGroup(g.name)}
+                    aria-expanded={!isCollapsed}
                     style={{
-                      display: "flex", alignItems: "center", justifyContent: "space-between",
-                      gap: "var(--space-3)", padding: "var(--space-2) 0",
-                      borderBottom: "1px solid var(--color-border)",
+                      display: "flex", alignItems: "center", justifyContent: "space-between", gap: "var(--space-2)",
+                      width: "100%", cursor: "pointer", background: "none", border: "none", textAlign: "left",
+                      padding: "var(--space-1) 0", marginTop: "var(--space-2)",
+                      borderBottom: "2px solid var(--color-border)",
                     }}
                   >
-                    <div style={{ minWidth: 0 }}>
-                      <p style={{ margin: 0, fontSize: "var(--text-sm)", color: "var(--color-text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.name}</p>
-                      {l.email && (
-                        <p style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--color-text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.email}</p>
-                      )}
-                    </div>
-                    <StatusPill status={l.status} attended={l.attended} absent={l.absent} />
-                  </li>
-                ))}
-              </ul>
+                    <span style={{ display: "flex", alignItems: "center", gap: "var(--space-1)", minWidth: 0 }}>
+                      <i className={isCollapsed ? "ri-arrow-right-s-line" : "ri-arrow-down-s-line"} aria-hidden="true" style={{ color: "var(--color-text-muted)", flexShrink: 0 }} />
+                      <span style={{ fontSize: "var(--text-xs)", fontWeight: "var(--font-semibold)", color: "var(--color-text-secondary)", textTransform: "uppercase", letterSpacing: "0.04em", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {g.name}{recorded ? " (not counted)" : ""}
+                      </span>
+                    </span>
+                    <span style={{ fontSize: 11, color: "var(--color-text-muted)", whiteSpace: "nowrap", flexShrink: 0 }}>
+                      {attendedInGroup} attended · {g.learners.length}
+                    </span>
+                  </button>
+                  {!isCollapsed && (
+                  <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                    {g.learners.map((l) => (
+                      <li
+                        key={l.id}
+                        title={l.sessions.map((s) => `${s.date}: ${s.status}${s.module ? ` (${s.module})` : ""}`).join("\n")}
+                        style={{
+                          display: "flex", alignItems: "center", justifyContent: "space-between",
+                          gap: "var(--space-3)", padding: "var(--space-2) 0",
+                          borderBottom: "1px solid var(--color-border)",
+                        }}
+                      >
+                        <div style={{ minWidth: 0 }}>
+                          <p style={{ margin: 0, fontSize: "var(--text-sm)", color: "var(--color-text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.name}</p>
+                          {l.email && (
+                            <p style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--color-text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.email}</p>
+                          )}
+                        </div>
+                        <StatusPill status={l.status} attended={l.attended} absent={l.absent} />
+                      </li>
+                    ))}
+                  </ul>
+                  )}
+                </div>
+                );
+              })
             )}
           </div>
         )}

@@ -1,3 +1,6 @@
+export type ReviewPeriodKey = "4w" | "8w" | "12w" | "all";
+export type PeriodCounts = Record<ReviewPeriodKey, { required: number; completed: number }>;
+
 export interface CoachRecord {
   id: number;
   associate: string;
@@ -15,6 +18,10 @@ export interface CoachRecord {
   otjhNormal?: number;
   otjhNeedAttention: number;
   otjhAtRisk: number;
+  // Variance-based OTJH counts (match the Metric Breakdown / chart bands).
+  otjhVarOnTrack?: number;
+  otjhVarNeedAttention?: number;
+  otjhVarAtRisk?: number;
   lastWeekPending: number;
   pending: number;
   markingProgressWeekly: number;
@@ -59,6 +66,10 @@ export interface CoachRecord {
   mcmCompleted12Weeks?: number;
   mcmCompletionRate12Weeks?: number;
   mcmBehind12Weeks?: number;
+  // Per-learner required/completed per window (4w/8w/12w/all) for the home-page
+  // PR & MCM performance charts' time-period filter.
+  prByLearner?: PeriodCounts;
+  mcmByLearner?: PeriodCounts;
   // Daily evidence submission buckets (from the Require Marking table).
   evToday?: number;
   evYesterday?: number;

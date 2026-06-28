@@ -1,8 +1,31 @@
+import { useState } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, Legend,
 } from "recharts";
-import { CoachRecord } from "@/mocks/dashboard";
+import { CoachRecord, type PeriodCounts, type ReviewPeriodKey } from "@/mocks/dashboard";
+
+const PERIOD_OPTIONS: { key: ReviewPeriodKey; label: string }[] = [
+  { key: "4w", label: "4 weeks" },
+  { key: "8w", label: "8 weeks" },
+  { key: "12w", label: "12 weeks" },
+  { key: "all", label: "All dates" },
+];
+
+const emptyPeriodCounts = (): PeriodCounts => ({
+  "4w": { required: 0, completed: 0 },
+  "8w": { required: 0, completed: 0 },
+  "12w": { required: 0, completed: 0 },
+  all: { required: 0, completed: 0 },
+});
+
+function addPeriodCounts(target: PeriodCounts, src?: PeriodCounts) {
+  if (!src) return;
+  (Object.keys(target) as ReviewPeriodKey[]).forEach((k) => {
+    target[k].required += src[k]?.required ?? 0;
+    target[k].completed += src[k]?.completed ?? 0;
+  });
+}
 
 interface ChartsSectionProps {
   records: CoachRecord[];
@@ -22,10 +45,12 @@ interface CaseOwnerAggregate {
   prDoneOld4Weeks: number;
   prOverallRequired: number;
   prOverallCompleted: number;
-  mcmRequired12Weeks: number;
-  mcmCompleted12Weeks: number;
+  mcmRequired4Weeks: number;
+  mcmCompleted4Weeks: number;
+  prByLearner: PeriodCounts;
+  mcmByLearner: PeriodCounts;
+  // Variance-based OTJH bands, matching the coach-page chart & Metric Breakdown.
   otjhOnTrack: number;
-  otjhNormal: number;
   otjhNeedAttention: number;
   otjhAtRisk: number;
 }
@@ -36,6 +61,7 @@ const C2 = "#0891B2";
 const C3 = "#D97706";
 const C4 = "#16A34A";
 const C5 = "#DC2626";
+const C6 = "#94A3B8";  // neutral slate (used for "Required" so "Over Due" can be the red)
 
 const tooltipStyle = {
   backgroundColor: "#ffffff",
@@ -59,22 +85,43 @@ const formatCaseOwnerLabel = (value: string | number) => {
 };
 
 function ChartCard({
-  title, subtitle, children,
+  title, subtitle, action, children,
 }: {
-  title: string; subtitle?: string; children: React.ReactNode;
+  title: string; subtitle?: string; action?: React.ReactNode; children: React.ReactNode;
 }) {
   return (
     <div className="chart-card">
-      <div className="chart-header">
+      <div className="chart-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "var(--space-2)" }}>
         <div>
           <h3 className="chart-title">{title}</h3>
           {subtitle && <p className="chart-subtitle">{subtitle}</p>}
         </div>
+        {action}
       </div>
       <div className="chart-body">
         {children}
       </div>
     </div>
+  );
+}
+
+const periodSelectStyle = {
+  borderRadius: "var(--radius-md)", border: "1px solid var(--color-border)",
+  background: "var(--color-canvas)", padding: "2px 6px",
+  fontSize: "var(--text-xs)", color: "var(--color-text-primary)", outline: "none", cursor: "pointer",
+} as const;
+
+function PeriodSelect({ value, onChange }: { value: ReviewPeriodKey; onChange: (v: ReviewPeriodKey) => void }) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value as ReviewPeriodKey)}
+      style={periodSelectStyle}
+      aria-label="Time period"
+      title="Time period"
+    >
+      {PERIOD_OPTIONS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}
+    </select>
   );
 }
 
@@ -91,8 +138,9 @@ function aggregateByCaseOwner(records: CoachRecord[]): CaseOwnerAggregate[] {
       evidenceReferred: 0, referredClosure: 0, lastWeekPending: 0, pending: 0,
       prRequired4Weeks: 0, prCompleted4Weeks: 0, prDoneOld4Weeks: 0,
       prOverallRequired: 0, prOverallCompleted: 0,
-      mcmRequired12Weeks: 0, mcmCompleted12Weeks: 0,
-      otjhOnTrack: 0, otjhNormal: 0, otjhNeedAttention: 0, otjhAtRisk: 0,
+      mcmRequired4Weeks: 0, mcmCompleted4Weeks: 0,
+      prByLearner: emptyPeriodCounts(), mcmByLearner: emptyPeriodCounts(),
+      otjhOnTrack: 0, otjhNeedAttention: 0, otjhAtRisk: 0,
     };
     current.totalLearners += r.totalLearners;
     current.recentSubmitters += r.recentSubmitters;
@@ -106,12 +154,14 @@ function aggregateByCaseOwner(records: CoachRecord[]): CaseOwnerAggregate[] {
     current.prDoneOld4Weeks += r.prDoneOld4Weeks ?? r.prCompleted4Weeks;
     current.prOverallRequired += r.prOverallRequired;
     current.prOverallCompleted += r.prOverallCompleted;
-    current.mcmRequired12Weeks += r.mcmRequired12Weeks ?? 0;
-    current.mcmCompleted12Weeks += r.mcmCompleted12Weeks ?? 0;
-    current.otjhOnTrack += r.otjhOnTrack;
-    current.otjhNormal += r.otjhNormal ?? 0;
-    current.otjhNeedAttention += r.otjhNeedAttention;
-    current.otjhAtRisk += r.otjhAtRisk;
+    current.mcmRequired4Weeks += r.mcmRequired4Weeks ?? 0;
+    current.mcmCompleted4Weeks += r.mcmCompleted4Weeks ?? 0;
+    addPeriodCounts(current.prByLearner, r.prByLearner);
+    addPeriodCounts(current.mcmByLearner, r.mcmByLearner);
+    // Use the variance-based bands so the home chart matches the coach page.
+    current.otjhOnTrack += r.otjhVarOnTrack ?? r.otjhOnTrack;
+    current.otjhNeedAttention += r.otjhVarNeedAttention ?? r.otjhNeedAttention;
+    current.otjhAtRisk += r.otjhVarAtRisk ?? r.otjhAtRisk;
     map.set(name, current);
     return map;
   }, new Map<string, CaseOwnerAggregate>());
@@ -119,6 +169,9 @@ function aggregateByCaseOwner(records: CoachRecord[]): CaseOwnerAggregate[] {
 }
 
 export default function ChartsSection({ records }: ChartsSectionProps) {
+  const [prPeriod, setPrPeriod] = useState<ReviewPeriodKey>("12w");
+  const [mcmPeriod, setMcmPeriod] = useState<ReviewPeriodKey>("4w");
+
   if (records.length === 0) {
     return (
       <div className="chart-card">
@@ -143,11 +196,6 @@ export default function ChartsSection({ records }: ChartsSectionProps) {
     ReferredClosure: r.referredClosure,
   }));
 
-  const overallPrData = grouped.map((r) => ({
-    name: r.name,
-    "Completion%": toPercent(r.prOverallCompleted, r.prOverallRequired),
-  }));
-
   const assignmentData = grouped.map((r) => ({
     name: r.name,
     "Last Week": r.lastWeekPending,
@@ -156,24 +204,22 @@ export default function ChartsSection({ records }: ChartsSectionProps) {
 
   const otjhData = grouped.map((r) => ({
     name: r.name,
-    OnTrack: r.otjhOnTrack,
-    Normal: r.otjhNormal > 0 ? r.otjhNormal : r.otjhAtRisk,
+    "On Track": r.otjhOnTrack,
     "Need Attention": r.otjhNeedAttention,
+    "At Risk": r.otjhAtRisk,
   }));
 
-  const prPerfData = grouped.map((r) => ({
-    name: r.name,
-    Required: r.prOverallRequired,
-    Completed: r.prOverallCompleted,
-    Behind: Math.max(r.prOverallRequired - r.prOverallCompleted, 0),
-  }));
+  const perfRow = (name: string, counts: { required: number; completed: number }) => ({
+    name,
+    Required: counts.required,
+    Completed: counts.completed,
+    "Over Due": Math.max(counts.required - counts.completed, 0),
+  });
 
-  const mcmPerfData = grouped.map((r) => ({
-    name: r.name,
-    Required: r.mcmRequired12Weeks,
-    Completed: r.mcmCompleted12Weeks,
-    Behind: Math.max(r.mcmRequired12Weeks - r.mcmCompleted12Weeks, 0),
-  }));
+  const prPerfData = grouped.map((r) => perfRow(r.name, r.prByLearner[prPeriod]));
+  const mcmPerfData = grouped.map((r) => perfRow(r.name, r.mcmByLearner[mcmPeriod]));
+
+  const periodLabel = (k: ReviewPeriodKey) => PERIOD_OPTIONS.find((p) => p.key === k)?.label ?? "";
 
   return (
     <div className="home-analytics-charts" style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
@@ -215,8 +261,8 @@ export default function ChartsSection({ records }: ChartsSectionProps) {
         </ChartCard>
 
         <ChartCard
-          title="OTJH risk spread — check for high 'Need Attention' volumes"
-          subtitle="On-track / Normal / Need Attention by case owner"
+          title="OTJH risk spread — check for high 'At Risk' volumes"
+          subtitle="On Track / Need Attention / At Risk by case owner"
         >
           <ResponsiveContainer width="100%" height={160}>
             <BarChart data={otjhData} margin={{ top: 4, right: 8, left: -20, bottom: 36 }}>
@@ -225,24 +271,9 @@ export default function ChartsSection({ records }: ChartsSectionProps) {
               <YAxis tick={axisStyle} />
               <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={cursorStyle} />
               <Legend wrapperStyle={{ fontSize: 10, color: "var(--color-text-secondary)", paddingTop: 8 }} />
-              <Bar dataKey="OnTrack" stackId="a" fill={C4} maxBarSize={36} />
-              <Bar dataKey="Normal" stackId="a" fill={C3} maxBarSize={36} />
-              <Bar dataKey="Need Attention" stackId="a" fill={C5} radius={[3, 3, 0, 0]} maxBarSize={36} />
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartCard>
-
-        <ChartCard
-          title="Overall PR completion rate per case owner"
-          subtitle="All-time % completed vs required"
-        >
-          <ResponsiveContainer width="100%" height={160}>
-            <BarChart data={overallPrData} margin={{ top: 4, right: 8, left: -20, bottom: 36 }}>
-              <CartesianGrid vertical={false} stroke="var(--color-border)" />
-              <XAxis dataKey="name" tick={axisStyle} angle={-28} textAnchor="end" interval={0} height={44} tickMargin={6} tickFormatter={formatCaseOwnerLabel} />
-              <YAxis tick={axisStyle} domain={[0, 110]} tickFormatter={(v) => `${v}%`} />
-              <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={cursorStyle} formatter={(v) => [`${v}%`, "Completion"]} />
-              <Bar dataKey="Completion%" fill={C1} radius={[3, 3, 0, 0]} maxBarSize={28} />
+              <Bar dataKey="On Track" stackId="a" fill={C4} maxBarSize={36} />
+              <Bar dataKey="Need Attention" stackId="a" fill={C3} maxBarSize={36} />
+              <Bar dataKey="At Risk" stackId="a" fill={C5} radius={[3, 3, 0, 0]} maxBarSize={36} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -265,8 +296,9 @@ export default function ChartsSection({ records }: ChartsSectionProps) {
         </ChartCard>
 
         <ChartCard
-          title="Progress review performance (last 12 weeks)"
-          subtitle="Required vs completed vs behind"
+          title="Progress review performance"
+          subtitle={`Required vs completed vs over due — by learner · ${periodLabel(prPeriod)}`}
+          action={<PeriodSelect value={prPeriod} onChange={setPrPeriod} />}
         >
           <ResponsiveContainer width="100%" height={160}>
             <BarChart data={prPerfData} margin={{ top: 4, right: 8, left: -20, bottom: 36 }}>
@@ -275,16 +307,17 @@ export default function ChartsSection({ records }: ChartsSectionProps) {
               <YAxis tick={axisStyle} />
               <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={cursorStyle} />
               <Legend wrapperStyle={{ fontSize: 10, color: "var(--color-text-secondary)", paddingTop: 8 }} />
-              <Bar dataKey="Required" fill={C5} radius={[3, 3, 0, 0]} maxBarSize={16} />
+              <Bar dataKey="Required" fill={C6} radius={[3, 3, 0, 0]} maxBarSize={16} />
               <Bar dataKey="Completed" fill={C4} radius={[3, 3, 0, 0]} maxBarSize={16} />
-              <Bar dataKey="Behind" fill={C3} radius={[3, 3, 0, 0]} maxBarSize={16} />
+              <Bar dataKey="Over Due" fill={C5} radius={[3, 3, 0, 0]} maxBarSize={16} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
 
         <ChartCard
-          title="MCM performance (last 12 weeks)"
-          subtitle="Required vs completed vs behind"
+          title="MCM performance"
+          subtitle={`Required vs completed vs over due — by learner · ${periodLabel(mcmPeriod)}`}
+          action={<PeriodSelect value={mcmPeriod} onChange={setMcmPeriod} />}
         >
           <ResponsiveContainer width="100%" height={160}>
             <BarChart data={mcmPerfData} margin={{ top: 4, right: 8, left: -20, bottom: 36 }}>
@@ -293,9 +326,9 @@ export default function ChartsSection({ records }: ChartsSectionProps) {
               <YAxis tick={axisStyle} />
               <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={cursorStyle} />
               <Legend wrapperStyle={{ fontSize: 10, color: "var(--color-text-secondary)", paddingTop: 8 }} />
-              <Bar dataKey="Required" fill={C5} radius={[3, 3, 0, 0]} maxBarSize={16} />
+              <Bar dataKey="Required" fill={C6} radius={[3, 3, 0, 0]} maxBarSize={16} />
               <Bar dataKey="Completed" fill={C2} radius={[3, 3, 0, 0]} maxBarSize={16} />
-              <Bar dataKey="Behind" fill={C3} radius={[3, 3, 0, 0]} maxBarSize={16} />
+              <Bar dataKey="Over Due" fill={C5} radius={[3, 3, 0, 0]} maxBarSize={16} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>

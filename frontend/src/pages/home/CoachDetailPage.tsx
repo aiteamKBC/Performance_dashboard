@@ -11,6 +11,8 @@ import {
 } from "@/services/coachesLateness";
 import AppShell from "@/components/AppShell";
 import MetricBreakdownTable from "./components/MetricBreakdownTable";
+import ActionPlanModal from "./components/ActionPlanModal";
+import { otjhVariance, otjhStatusFromVariance } from "@/utils/otjh";
 
 const STATUS_COLOR: Record<string, string> = {
   "On Track": "#16A34A",
@@ -57,6 +59,7 @@ export default function CoachDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [highlightedSection, setHighlightedSection] = useState<string | null>(null);
   const [breakdownMetric, setBreakdownMetric] = useState<string>("ALL");
+  const [showActionPlan, setShowActionPlan] = useState(false);
 
   // Scroll to the metric breakdown table, optionally pre-filtering by metric,
   // and briefly highlight it.
@@ -113,14 +116,28 @@ export default function CoachDetailPage() {
     return () => { cancelled = true; };
   }, [id]);
 
+  // OTJH chart bands, derived from the same variance-based status as the Metric
+  // Breakdown table (computed per learner from the drill rows), so the two stay
+  // in sync. Falls back to the record's source counts until the drill loads.
   const otjhData = useMemo(() => {
-    if (!record) return [];
+    const counts: Record<string, number> = { "On Track": 0, "Need Attention": 0, "At Risk": 0 };
+    if (drill?.per_learner?.length) {
+      for (const l of drill.per_learner) {
+        if (!l.otjh_status) continue;
+        const band = otjhStatusFromVariance(otjhVariance(l.completed, l.otjh_progress_hours), l.otjh_status);
+        if (band in counts) counts[band] += 1;
+      }
+    } else if (record) {
+      counts["On Track"] = record.otjhOnTrack;
+      counts["Need Attention"] = record.otjhNeedAttention;
+      counts["At Risk"] = record.otjhAtRisk;
+    }
     return [
-      { name: "On Track", value: record.otjhOnTrack, color: STATUS_COLOR["On Track"] },
-      { name: "Need Attention", value: record.otjhNeedAttention, color: STATUS_COLOR["Need Attention"] },
-      { name: "At Risk", value: record.otjhAtRisk, color: STATUS_COLOR["At Risk"] },
+      { name: "On Track", value: counts["On Track"], color: STATUS_COLOR["On Track"] },
+      { name: "Need Attention", value: counts["Need Attention"], color: STATUS_COLOR["Need Attention"] },
+      { name: "At Risk", value: counts["At Risk"], color: STATUS_COLOR["At Risk"] },
     ].filter((d) => d.value > 0);
-  }, [record]);
+  }, [record, drill]);
 
   // Monthly PR/MCM completion-rate trend, derived from the per-review rows in
   // the drill response. Each review slot counts toward its planned month's
@@ -233,6 +250,14 @@ export default function CoachDetailPage() {
                   </p>
                 </div>
               </div>
+              <button
+                type="button"
+                onClick={() => setShowActionPlan(true)}
+                className="btn btn--primary"
+                title="Add an action plan for this coach"
+              >
+                <i className="ri-clipboard-line" aria-hidden="true" /> Action Plan
+              </button>
             </div>
 
             {/* KPI header */}
@@ -282,8 +307,8 @@ export default function CoachDetailPage() {
                         <YAxis tick={{ fontSize: 11, fill: "#9CA3AF" }} domain={[0, 100]} tickFormatter={(v) => `${v}%`} width={44} />
                         <Tooltip formatter={(value: number | null) => (value == null ? "—" : `${value}%`)} />
                         <Legend wrapperStyle={{ fontSize: 11 }} />
-                        <Line type="monotone" dataKey="PR" name="PR" stroke="#16A34A" strokeWidth={2} dot={{ r: 3 }} connectNulls />
-                        <Line type="monotone" dataKey="MCM" name="MCM" stroke="#0891B2" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                        <Line type="monotone" dataKey="PR" name="PR" stroke="#4F46E5" strokeWidth={2} dot={{ r: 3 }} connectNulls />
+                        <Line type="monotone" dataKey="MCM" name="MCM" stroke="#D97706" strokeWidth={2} dot={{ r: 3 }} connectNulls />
                       </LineChart>
                     </ResponsiveContainer>
                   )}
@@ -335,6 +360,14 @@ export default function CoachDetailPage() {
           </>
         )}
       </div>
+
+      {record && showActionPlan && (
+        <ActionPlanModal
+          coachName={record.coach}
+          caseOwnerId={record.caseOwnerId}
+          onClose={() => setShowActionPlan(false)}
+        />
+      )}
 
       <style>{`
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }

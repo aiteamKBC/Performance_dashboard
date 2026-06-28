@@ -47,6 +47,11 @@ export default function CoachCards({ records, onSelect }: CoachCardsProps) {
       }}>
         {records.map((r) => {
           const prRate = r.prOverallCompletionRate;
+          // OTJH counts use the variance-based bands (same as the Metric
+          // Breakdown table & coach-page chart); fall back to the source bands.
+          const otjhOnTrack = r.otjhVarOnTrack ?? r.otjhOnTrack;
+          const otjhNeedAttention = r.otjhVarNeedAttention ?? r.otjhNeedAttention;
+          const otjhAtRisk = r.otjhVarAtRisk ?? r.otjhAtRisk;
           return (
             <button
               key={r.id}
@@ -94,7 +99,7 @@ export default function CoachCards({ records, onSelect }: CoachCardsProps) {
                 <Stat label="Learners" value={r.totalLearners} />
                 <Stat label="Engagement" value={`${r.learnerEngagement}%`} color={tone(r.learnerEngagement, 85, 70)} />
                 <Stat label="PR Rate" value={`${prRate}%`} color={tone(prRate, 90, 70)} />
-                <Stat label="OTJH Risk" value={r.otjhAtRisk} color={tone(r.otjhAtRisk, 4, 7, true)} />
+                <Stat label="OTJH Risk" value={otjhAtRisk} color={tone(otjhAtRisk, 4, 7, true)} />
                 <Stat label="Pending" value={r.pending} color={tone(r.pending, 12, 20, true)} />
                 <Stat label="Ref Closure" value={r.referredClosure} />
               </div>
@@ -104,7 +109,7 @@ export default function CoachCards({ records, onSelect }: CoachCardsProps) {
                 <p style={{ margin: "0 0 4px", fontSize: 10, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>OTJH</p>
                 <div style={{ display: "flex", height: 6, borderRadius: 999, overflow: "hidden", background: "var(--color-canvas)" }}>
                   {(() => {
-                    const on = r.otjhOnTrack, att = r.otjhNeedAttention, risk = r.otjhAtRisk;
+                    const on = otjhOnTrack, att = otjhNeedAttention, risk = otjhAtRisk;
                     const total = on + att + risk || 1;
                     return (
                       <>

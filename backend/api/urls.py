@@ -2,7 +2,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
     CoachesLatenessViewSet, CoachSummaryViewSet, KPIsListView, CoachDrillView,
-    AttendanceWeeksView, AttendanceDrillView,
+    AttendanceWeeksView, AttendanceDrillView, ActionPlanView,
 )
 
 router = DefaultRouter()
@@ -15,4 +15,5 @@ urlpatterns = [
     path('coach-drill/', CoachDrillView.as_view(), name='coach-drill'),
     path('attendance-weeks/', AttendanceWeeksView.as_view(), name='attendance-weeks'),
     path('attendance-drill/', AttendanceDrillView.as_view(), name='attendance-drill'),
+    path('action-plans/', ActionPlanView.as_view(), name='action-plans'),
 ]

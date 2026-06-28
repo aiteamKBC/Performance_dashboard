@@ -5,15 +5,12 @@ import { fetchCoachesLateness } from "@/services/coachesLateness";
 import { TopbarLeft, TopbarRight } from "./components/DashboardHeader";
 import ChartsSection from "./components/ChartsSection";
 import CoachCards from "./components/CoachCards";
-import MasterTable from "./components/MasterTable";
-import CoachDrillDrawer from "./components/CoachDrillDrawer";
 import AppShell from "@/components/AppShell";
 
 export default function Home() {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCoach, setActiveCoach] = useState("All");
-  const [drillCoach, setDrillCoach] = useState<CoachRecord | null>(null);
   const [coachRecords, setCoachRecords] = useState<CoachRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -136,17 +133,8 @@ export default function Home() {
 
           {/* Chart row */}
           <ChartsSection records={filtered} />
-
-          {/* Full-width data table */}
-          <MasterTable records={filtered} onRowClick={setDrillCoach} />
         </div>
       </AppShell>
-
-      <CoachDrillDrawer
-        coach={drillCoach?.coach ?? null}
-        caseOwnerId={drillCoach?.caseOwnerId ?? null}
-        onClose={() => setDrillCoach(null)}
-      />
 
       <style>{`
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }

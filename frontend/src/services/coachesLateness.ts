@@ -64,6 +64,66 @@ export interface CoachDrill {
   sections: DrillSection[];
 }
 
+export interface ActionPlan {
+  id: number;
+  coach_name: string;
+  case_owner_id: string | null;
+  title: string;
+  notes: string;
+  creator_name: string | null;
+  saved_date: string | null;
+}
+
+export const fetchActionPlans = async (coach: string): Promise<ActionPlan[]> => {
+  const params = new URLSearchParams({ coach });
+  const response = await fetch(buildApiUrl(`/api/action-plans/?${params.toString()}`));
+  if (!response.ok) {
+    throw new Error(`Error: ${response.status} ${response.statusText}`);
+  }
+  return response.json();
+};
+
+export const createActionPlan = async (input: {
+  coach: string;
+  title: string;
+  notes: string;
+  creator?: string;
+  caseOwnerId?: number | null;
+}): Promise<ActionPlan> => {
+  const response = await fetch(buildApiUrl('/api/action-plans/'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      coach: input.coach,
+      title: input.title,
+      notes: input.notes,
+      creator: input.creator ?? '',
+      case_owner_id: input.caseOwnerId ?? null,
+    }),
+  });
+  if (!response.ok) {
+    let detail = `${response.status} ${response.statusText}`;
+    try {
+      const body = await response.json();
+      if (body?.detail) detail = body.detail;
+    } catch {
+      /* ignore non-JSON error bodies */
+    }
+    throw new Error(detail);
+  }
+  return response.json();
+};
+
+export const deleteActionPlan = async (id: number): Promise<void> => {
+  const params = new URLSearchParams({ id: String(id) });
+  const response = await fetch(buildApiUrl(`/api/action-plans/?${params.toString()}`), {
+    method: 'DELETE',
+  });
+  if (!response.ok) {
+    throw new Error(`Error: ${response.status} ${response.statusText}`);
+  }
+};
+
 export const fetchCoachDrill = async (
   coach: string,
   caseOwnerId?: number | null,
@@ -163,6 +223,30 @@ export const fetchCoachesLateness = async (): Promise<CoachRecord[]> => {
         ? toNumber(item.evidence_week_total)
         : evToday + evYesterday + evMinus2 + evMinus3 + evMinus4 + evMinus5 + evMinus6 + evMinus7;
 
+      // Per-learner required/completed per window (4w/8w/12w/all) for the
+      // home-page PR & MCM performance charts. Prefer the API's per-learner
+      // buckets (pr_bylearner / mcm_bylearner); if the backend hasn't sent them
+      // yet, fall back to the per-window numbers already used on the coaches
+      // page so the charts aren't empty ("all" ≈ the 12-week figure).
+      const periodCounts = (
+        obj: any,
+        fb: { req4: number; done4: number; req8: number; done8: number; req12: number; done12: number },
+      ) => {
+        if (obj && (obj["4w"] || obj["8w"] || obj["12w"] || obj.all)) {
+          const pick = (k: string) => ({
+            required: toNumber(obj?.[k]?.required),
+            completed: toNumber(obj?.[k]?.completed),
+          });
+          return { "4w": pick("4w"), "8w": pick("8w"), "12w": pick("12w"), all: pick("all") };
+        }
+        return {
+          "4w": { required: fb.req4, completed: fb.done4 },
+          "8w": { required: fb.req8, completed: fb.done8 },
+          "12w": { required: fb.req12, completed: fb.done12 },
+          all: { required: fb.req12, completed: fb.done12 },
+        };
+      };
+
       return {
         id: index + 1,
         associate: caseOwner.split(' ')[0] || 'Unknown',
@@ -180,6 +264,9 @@ export const fetchCoachesLateness = async (): Promise<CoachRecord[]> => {
         otjhNormal: toNumber(item.otjh_normal_0_20_field),
         otjhNeedAttention: toNumber(item.otjh_need_attention_20_40_field),
         otjhAtRisk: toNumber(item.otjh_at_risk_40_field),
+        otjhVarOnTrack: toNumber(item.otjh_var_ontrack),
+        otjhVarNeedAttention: toNumber(item.otjh_var_need_attention),
+        otjhVarAtRisk: toNumber(item.otjh_var_at_risk),
         // Marking Weekly needs a prior-week pending snapshot the live sources
         // don't carry, so lastWeekPending mirrors pending (0% week-over-week).
         lastWeekPending: pending,
@@ -224,6 +311,16 @@ export const fetchCoachesLateness = async (): Promise<CoachRecord[]> => {
         prRequired12Weeks,
         prCompleted12Weeks,
         prCompletionRate12Weeks: prOverallCompletionRate,
+        prByLearner: periodCounts(item.pr_bylearner, {
+          req4: prRequired4Weeks, done4: prCompleted4Weeks,
+          req8: prRequired8Weeks, done8: prCompleted8Weeks,
+          req12: prOverallRequired, done12: prOverallCompleted,
+        }),
+        mcmByLearner: periodCounts(item.mcm_bylearner, {
+          req4: mcmRequired4Weeks, done4: mcmCompleted4Weeks,
+          req8: mcmRequired8Weeks, done8: mcmCompleted8Weeks,
+          req12: mcmRequired12Weeks, done12: mcmCompleted12Weeks,
+        }),
         mcmRequired4Weeks,
         mcmCompleted4Weeks,
         mcmCompletionRate4Weeks,

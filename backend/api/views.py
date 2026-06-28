@@ -7,6 +7,7 @@ from .models import CoachesLateness, CoachSummary
 from .serializers import CoachesLatenessSerializer, CoachSummarySerializer
 from .lateness_compute import compute_coaches_lateness, compute_coach_drill
 from .attendance_compute import get_attendance_weeks, get_attendance_drill
+from .action_plan import create_action_plan, list_action_plans, delete_action_plan
 
 class CoachesLatenessViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = CoachesLateness.objects.all()
@@ -30,6 +31,49 @@ class CoachDrillView(APIView):
             except (TypeError, ValueError):
                 case_owner_id = None
         return Response(compute_coach_drill(coach_name=coach_name, case_owner_id=case_owner_id))
+
+class ActionPlanView(APIView):
+    """Coach action plans (title + notes), stored in the KBC database.
+
+    GET  ?coach=<name>            -> list a coach's action plans (newest first).
+    POST {coach, title, notes, case_owner_id?} -> create one.
+    """
+    def get(self, request):
+        coach = request.query_params.get("coach")
+        if not coach:
+            return Response({"detail": "coach is required"}, status=400)
+        return Response(list_action_plans(coach))
+
+    def post(self, request):
+        data = request.data or {}
+        coach = (data.get("coach") or "").strip()
+        title = (data.get("title") or "").strip()
+        notes = (data.get("notes") or "").strip()
+        if not coach:
+            return Response({"detail": "coach is required"}, status=400)
+        if not title:
+            return Response({"detail": "title is required"}, status=400)
+        case_owner_id = data.get("case_owner_id")
+        try:
+            case_owner_id = int(case_owner_id) if case_owner_id is not None else None
+        except (TypeError, ValueError):
+            case_owner_id = None
+        creator = (data.get("creator") or "").strip() or None
+        created = create_action_plan(
+            coach, title, notes, case_owner_id=case_owner_id, creator_name=creator,
+        )
+        return Response(created, status=201)
+
+    def delete(self, request):
+        plan_id = request.query_params.get("id") or (request.data or {}).get("id")
+        try:
+            plan_id = int(plan_id)
+        except (TypeError, ValueError):
+            return Response({"detail": "a valid id is required"}, status=400)
+        if not delete_action_plan(plan_id):
+            return Response({"detail": "not found"}, status=404)
+        return Response(status=204)
+
 
 class CoachSummaryViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = CoachSummary.objects.all()

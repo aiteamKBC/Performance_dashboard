@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DrillLearnerRow, ReviewRow } from "@/services/coachesLateness";
 import { downloadXlsx, type Cell } from "@/utils/xlsx";
+import { otjhTarget, otjhVariance, otjhStatusFromVariance, formatHours } from "@/utils/otjh";
 
 const STATUS_COLOR: Record<string, string> = {
   "On Track": "#16A34A",
@@ -46,11 +47,13 @@ const STATUS_OPTIONS: Record<string, string[]> = {
   OTJH: ["At Risk", "Need Attention", "On Track"],
 };
 
+// Windows are calendar months back from today (4w → 1 month, 8w → 2, 12w → 3),
+// rolling day by day — e.g. today 2026-06-26, "4 weeks" starts 2026-05-26.
 const PERIODS = [
-  { key: "ALL", label: "All dates", days: null },
-  { key: "12W", label: "12 weeks", days: 84 },
-  { key: "8W", label: "8 weeks", days: 56 },
-  { key: "4W", label: "4 weeks", days: 28 },
+  { key: "ALL", label: "All dates", months: null },
+  { key: "12W", label: "12 weeks", months: 3 },
+  { key: "8W", label: "8 weeks", months: 2 },
+  { key: "4W", label: "4 weeks", months: 1 },
 ] as const;
 
 interface MetricRow {
@@ -64,38 +67,42 @@ interface MetricRow {
   // OTJH-only detail columns (shown in place of Window/Date when OTJH selected).
   completed?: number;
   target?: string;
+  targetHours?: number;   // numeric form of the computed target (for Excel export)
   progressHours?: string;
   progressVariance?: string;
 }
 
-// Day-of-window tag for a date relative to today.
+// The date `n` calendar months before `base`, same day-of-month, clamped to the
+// target month's last day (e.g. Mar 31 − 1mo → Feb 28).
+function monthsBackDate(base: Date, n: number): Date {
+  const m = base.getMonth() - n;
+  const targetY = base.getFullYear() + Math.floor(m / 12);
+  const targetM = ((m % 12) + 12) % 12;
+  const lastDay = new Date(targetY, targetM + 1, 0).getDate();
+  const d = new Date(targetY, targetM, Math.min(base.getDate(), lastDay));
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+// Window tag for a date relative to today (calendar-month windows).
 function windowTag(dateIso: string, today: Date): string {
   if (!dateIso) return "—";
   const d = new Date(dateIso + "T00:00:00");
   if (Number.isNaN(d.getTime())) return "—";
-  const diff = Math.floor((today.getTime() - d.getTime()) / 86400000);
-  if (diff < 0) return "Upcoming";
-  if (diff <= 27) return "4w";
-  if (diff <= 55) return "8w";
-  if (diff <= 83) return "12w";
+  if (d.getTime() > today.getTime()) return "Upcoming";
+  if (d.getTime() >= monthsBackDate(today, 1).getTime()) return "4w";
+  if (d.getTime() >= monthsBackDate(today, 2).getTime()) return "8w";
+  if (d.getTime() >= monthsBackDate(today, 3).getTime()) return "12w";
   return "Older";
 }
 
-function withinDays(dateIso: string, today: Date, days: number | null): boolean {
-  if (days == null) return true;
+// Whether a date falls within the last `months` (inclusive of today, no future).
+function withinPeriod(dateIso: string, today: Date, months: number | null): boolean {
+  if (months == null) return true;
   if (!dateIso) return false;
   const d = new Date(dateIso + "T00:00:00");
   if (Number.isNaN(d.getTime())) return false;
-  const diff = Math.floor((today.getTime() - d.getTime()) / 86400000);
-  return diff >= 0 && diff <= days - 1;
-}
-
-function otjhBand(raw: string): string {
-  const t = raw.toLowerCase().replace(/-/g, " ").trim();
-  if (t === "at risk" || t === "atrisk") return "At Risk";
-  if (t === "need attention") return "Need Attention";
-  if (t === "ontrack" || t === "on track") return "On Track";
-  return raw || "—";
+  return d.getTime() >= monthsBackDate(today, months).getTime() && d.getTime() <= today.getTime();
 }
 
 /**
@@ -116,10 +123,19 @@ function buildRows(learners: DrillLearnerRow[], reviewRows: ReviewRow[]): Metric
 
   for (const l of learners) {
     const base = { name: l.name, email: l.email, programme: l.programme };
-    if (l.otjh_status) out.push({
-      ...base, metric: "OTJH", metricKey: "OTJH", status: otjhBand(l.otjh_status), date: "",
-      completed: l.completed, target: l.otjh_target, progressHours: l.otjh_progress_hours, progressVariance: l.otjh_progress_variance,
-    });
+    if (l.otjh_status) {
+      const tgt = otjhTarget(l.completed, l.otjh_progress_hours);
+      const variance = otjhVariance(l.completed, l.otjh_progress_hours);
+      out.push({
+        ...base, metric: "OTJH", metricKey: "OTJH",
+        status: otjhStatusFromVariance(variance, l.otjh_status), date: "",
+        completed: l.completed,
+        target: tgt == null ? "" : formatHours(tgt),
+        targetHours: tgt == null ? undefined : Math.round(tgt * 10) / 10,
+        progressHours: l.otjh_progress_hours,
+        progressVariance: variance == null ? "" : `${Math.round(variance)}%`,
+      });
+    }
     if (l.submitted > 0) out.push({ ...base, metric: "Engaged", metricKey: "ENGAGED", status: "Engaged", date: l.last_sub });
     if (l.pending > 0) out.push({ ...base, metric: "Evidence Pending", metricKey: "PENDING", status: `${l.pending} pending`, date: l.last_sub });
     if (l.referred_closure > 0) out.push({ ...base, metric: "Referred Closure", metricKey: "CLOSURE", status: `${l.referred_closure} closure`, date: "" });
@@ -174,14 +190,14 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
   const statusMode = statusOptions.length > 0;
 
   const rows = useMemo(() => {
-    const periodDays = PERIODS.find((p) => p.key === period)?.days ?? null;
+    const periodMonths = PERIODS.find((p) => p.key === period)?.months ?? null;
     return allRows.filter((r) => {
       if (metric !== "ALL" && r.metricKey !== metric) return false;
       if (programme !== "ALL" && r.programme !== programme) return false;
       // Status filter applies to the selected metric (PR/MCM/OTJH).
       if (statusMode && status !== "ALL" && r.status !== status) return false;
       // Time period only constrains dated PR/MCM rows.
-      if (reviewMode && periodDays != null && !withinDays(r.date, today, periodDays)) return false;
+      if (reviewMode && periodMonths != null && !withinPeriod(r.date, today, periodMonths)) return false;
       return true;
     });
   }, [allRows, metric, programme, status, period, statusMode, reviewMode, today]);
@@ -291,7 +307,7 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
         if (otjhView) {
           data.push([
             r.name, r.email || "", r.programme || "", r.metric, r.status,
-            r.completed ?? "", r.target || "", r.progressHours || "", r.progressVariance || "",
+            r.completed ?? "", r.targetHours ?? "", r.progressHours || "", r.progressVariance || "",
           ]);
         } else {
           data.push([

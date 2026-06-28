@@ -110,9 +110,10 @@ export interface AttendanceDrillLearner {
   id: number;
   name: string;
   email: string;
+  group: string;
   attended: number;
   absent: number;
-  status: 'attended' | 'absent' | 'partial' | 'no-session';
+  status: 'attended' | 'absent' | 'partial';
   sessions: AttendanceDrillSession[];
 }
 

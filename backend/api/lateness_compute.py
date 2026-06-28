@@ -33,8 +33,10 @@ EXCLUDE = {
     ]
 }
 
-# Rolling period windows, in days, mirroring the n8n PERIODS config.
-PERIODS = (("4w", 28), ("8w", 56), ("12w", 84))
+# Rolling period windows, expressed as calendar MONTHS back from today
+# (4w ≈ 1 month, 8w ≈ 2 months, 12w ≈ 3 months). Anchored to today and rolling
+# day by day: e.g. today 2026-06-26, the 4w window starts 2026-05-26.
+PERIODS = (("4w", 1), ("8w", 2), ("12w", 3))
 
 # Weekly completed-count buckets, mirroring the n8n WEEK_BUCKETS config.
 # offsetDays is how many days back the (inclusive) 7-day window ends.
@@ -104,16 +106,42 @@ def _extract_paren_status(value):
     return m.group(1) if m else text
 
 
+def _review_display_date(planned_date, status_raw, category):
+    """The date to surface for a review slot in the Metric Breakdown table.
+
+    When the review is **Completed**, the completion date is written into the
+    status cell next to "Completed" (e.g. ``"Completed 29-04-2026"``); we surface
+    that actual completion date. For anything not completed (Scheduled / Not
+    Scheduled / In Progress / Awaiting Signature) there is no completion date, so
+    the planned date is reflected instead. A Completed cell with no parseable
+    date token also falls back to the planned date.
+    """
+    if category == "Completed":
+        completed_on = _parse_review_date(status_raw)
+        if completed_on:
+            return completed_on
+    return planned_date
+
+
 def _today():
     return date.today()
 
 
+def _months_back(d, n):
+    """The date ``n`` calendar months before ``d``, same day-of-month, clamped to
+    the last day of the target month (e.g. 2026-03-31 − 1mo → 2026-02-28)."""
+    m = d.month - 1 - n
+    year = d.year + m // 12
+    month = m % 12 + 1
+    next_first = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
+    last_day = (next_first - timedelta(days=1)).day
+    return date(year, month, min(d.day, last_day))
+
+
 def _period_ranges(today):
-    """Inclusive [start, end] date windows for each rolling period."""
-    ranges = {}
-    for key, days in PERIODS:
-        ranges[key] = (today - timedelta(days=days - 1), today)
-    return ranges
+    """Inclusive [start, end] windows for each rolling period, as calendar months
+    back from today (4w → 1 month, 8w → 2 months, 12w → 3 months)."""
+    return {key: (_months_back(today, months), today) for key, months in PERIODS}
 
 
 def _week_ranges(today):
@@ -156,6 +184,63 @@ def _fetch_dicts(sql):
 
 
 # --------------------------------------------------------------------------
+# OTJH band from progress variance (mirrors the frontend utils/otjh.ts)
+# --------------------------------------------------------------------------
+
+_PH_H_RE = re.compile(r"(\d+)\s*h", re.IGNORECASE)
+_PH_M_RE = re.compile(r"(\d+)\s*m", re.IGNORECASE)
+
+
+def _parse_progress_hours(value):
+    """Signed 'Xh Ym' progress-hours string -> decimal hours (or None)."""
+    text = _clean(value)
+    if not text:
+        return None
+    h = _PH_H_RE.search(text)
+    m = _PH_M_RE.search(text)
+    if not h and not m:
+        cleaned = re.sub(r"[^0-9.\-]", "", text)
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
+    mag = (int(h.group(1)) if h else 0) + (int(m.group(1)) if m else 0) / 60.0
+    return -mag if text.lstrip().startswith("-") else mag
+
+
+def _otjh_source_band(status):
+    """Map raw OTJHoursStatus -> 'on_track' | 'need_attention' | 'at_risk' | None."""
+    t = _lower(status).replace("-", " ").strip()
+    if t in ("ontrack", "on track"):
+        return "on_track"
+    if t == "need attention":
+        return "need_attention"
+    if t in ("at risk", "atrisk"):
+        return "at_risk"
+    return None
+
+
+def _otjh_variance_band(completed, progress_raw, status):
+    """OTJH band from progress variance = progress_hours / (completed - progress_hours).
+
+    >= -5% On Track; -5%..-15% Need Attention; worse than -15% At Risk. Falls back
+    to the source OTJHoursStatus band when the variance can't be computed.
+    """
+    ph = _parse_progress_hours(progress_raw)
+    if ph is None:
+        return _otjh_source_band(status)
+    target = (completed or 0) - ph
+    if not target:
+        return _otjh_source_band(status)
+    variance = (ph / target) * 100
+    if variance >= -5:
+        return "on_track"
+    if variance >= -15:
+        return "need_attention"
+    return "at_risk"
+
+
+# --------------------------------------------------------------------------
 # Per-source aggregation
 # --------------------------------------------------------------------------
 
@@ -163,7 +248,7 @@ def _aggregate_aptem(today):
     """Total learners, OTJH buckets, and evidence docs per owner (active only)."""
     rows = _fetch_dicts(
         'SELECT "OwnerName", case_owner_id, "OwnerPhone", "Email", '
-        '"Program-Status", "OTJHoursStatus", '
+        '"Program-Status", "OTJHoursStatus", "Progress-Hours", '
         '"Assignment Evidence", "LMS Evidence", "ExtraAct-Evidence", '
         '"Submitted", "Completed" '
         'FROM aptem_auto_extracting'
@@ -189,6 +274,10 @@ def _aggregate_aptem(today):
                 "otjhOnTrack": 0,
                 "otjhNeedAttention": 0,
                 "otjhAtRisk": 0,
+                # Variance-based OTJH bands (match the Metric Breakdown / chart).
+                "otjhVarOnTrack": 0,
+                "otjhVarNeedAttention": 0,
+                "otjhVarAtRisk": 0,
                 "evidenceTotal": 0,
             }
         if bucket["caseOwnerId"] in (None, "") and r.get("case_owner_id") not in (None, ""):
@@ -209,6 +298,18 @@ def _aggregate_aptem(today):
             bucket["otjhNeedAttention"] += 1
         elif otjh in ("at risk", "atrisk"):
             bucket["otjhAtRisk"] += 1
+
+        # Variance-based band (progress-hours vs target) — same logic the
+        # Metric Breakdown table and the coach-page OTJH chart use.
+        var_band = _otjh_variance_band(
+            float(r.get("Completed") or 0), r.get("Progress-Hours"), r.get("OTJHoursStatus"),
+        )
+        if var_band == "on_track":
+            bucket["otjhVarOnTrack"] += 1
+        elif var_band == "need_attention":
+            bucket["otjhVarNeedAttention"] += 1
+        elif var_band == "at_risk":
+            bucket["otjhVarAtRisk"] += 1
 
         bucket["evidenceTotal"] += (
             (r.get("Assignment Evidence") or 0)
@@ -315,7 +416,20 @@ def _aggregate_reviews(today, table, date_prefix, status_prefix, count):
             bucket = agg[owner] = {
                 "periods": {key: {"required": 0, "completed": 0} for key, _ in PERIODS},
                 "weeks": {key: 0 for key, _ in WEEK_BUCKETS},
+                # Per-learner tally per window (plus "all" = every date): each
+                # learner (row) counts once. "required" = learner had a review
+                # due in that window; "completed" = the learner completed ANY
+                # review due in that window.
+                "learner": {
+                    **{key: {"required": 0, "completed": 0} for key, _ in PERIODS},
+                    "all": {"required": 0, "completed": 0},
+                },
             }
+
+        # Per window (and "all" dates): did this learner have any review due,
+        # and did they complete any of them?
+        has_any = {**{key: False for key, _ in PERIODS}, "all": False}
+        has_completed = {**{key: False for key, _ in PERIODS}, "all": False}
 
         for i in range(1, count + 1):
             planned_raw = r.get("%s%d" % (date_prefix, i))
@@ -337,11 +451,28 @@ def _aggregate_reviews(today, table, date_prefix, status_prefix, count):
                 bucket["periods"][key]["required"] += 1
                 if is_completed:
                     bucket["periods"][key]["completed"] += 1
+                # Per-learner: had a review due in this window, and completed any.
+                has_any[key] = True
+                if is_completed:
+                    has_completed[key] = True
+
+            # "All dates": any review due on or before today (future-dated /
+            # scheduled reviews are excluded, mirroring the windowed buckets).
+            if planned_date <= today:
+                has_any["all"] = True
+                if is_completed:
+                    has_completed["all"] = True
 
             if is_completed:
                 for key, _offset in WEEK_BUCKETS:
                     if _in_range(planned_date, wranges[key]):
                         bucket["weeks"][key] += 1
+
+        for key in has_any:
+            if has_any[key]:
+                bucket["learner"][key]["required"] += 1
+                if has_completed[key]:
+                    bucket["learner"][key]["completed"] += 1
 
     return agg
 
@@ -387,10 +518,16 @@ def compute_coaches_lateness():
         last_sub = min_date.isoformat() if min_date else ""
         elapsed = (today - min_date).days if min_date else 0
 
+        p_learner = p.get("learner", {})
+        m_learner = m.get("learner", {})
+
         pr4 = p_periods.get("4w", empty_period)
         pr8 = p_periods.get("8w", empty_period)
-        pr12 = p_periods.get("12w", empty_period)
-        mcm4 = m_periods.get("4w", empty_period)
+        # PR 12-week and MCM 4-week are counted PER LEARNER (one per learner, by
+        # their most recent due review's status), not per review slot — see
+        # _aggregate_reviews. The other windows stay per slot.
+        pr12 = p_learner.get("12w", empty_period)
+        mcm4 = m_learner.get("4w", empty_period)
         mcm8 = m_periods.get("8w", empty_period)
         mcm12 = m_periods.get("12w", empty_period)
 
@@ -398,6 +535,20 @@ def compute_coaches_lateness():
             return round((part["completed"] / part["required"]) * 1000) / 10 if part["required"] else 0
 
         completion_rate = rate(pr12)
+
+        # Per-learner required/completed for every window (4w/8w/12w/all) — used
+        # by the home-page PR/MCM performance charts' time-period filter.
+        def bylearner_map(learner):
+            return {
+                k: {
+                    "required": learner.get(k, empty_period)["required"],
+                    "completed": learner.get(k, empty_period)["completed"],
+                }
+                for k in ("4w", "8w", "12w", "all")
+            }
+
+        pr_bylearner = bylearner_map(p_learner)
+        mcm_bylearner = bylearner_map(m_learner)
 
         case_owner_id = a.get("caseOwnerId") or mk.get("caseOwnerId")
         phone = a.get("phone") or mk.get("phone") or ""
@@ -417,6 +568,10 @@ def compute_coaches_lateness():
             "otjh_ontrack_0_field": a.get("otjhOnTrack", 0),
             "otjh_need_attention_20_40_field": a.get("otjhNeedAttention", 0),
             "otjh_at_risk_40_field": a.get("otjhAtRisk", 0),
+            # Variance-based OTJH counts (match the Metric Breakdown / chart bands).
+            "otjh_var_ontrack": a.get("otjhVarOnTrack", 0),
+            "otjh_var_need_attention": a.get("otjhVarNeedAttention", 0),
+            "otjh_var_at_risk": a.get("otjhVarAtRisk", 0),
 
             # Pending & marking (from Require Marking)
             "pending": pending,
@@ -468,6 +623,11 @@ def compute_coaches_lateness():
             # Kept for backward-compat with the existing service mapping.
             "required_mcm": mcm4["required"],
             "completed_mcm": mcm4["completed"],
+
+            # Per-learner required/completed per window (4w/8w/12w/all) for the
+            # home-page PR & MCM performance charts' time-period filter.
+            "pr_bylearner": pr_bylearner,
+            "mcm_bylearner": mcm_bylearner,
         })
 
     return records
@@ -870,13 +1030,17 @@ def _review_rows(table, date_prefix, status_prefix, count, name, cid, today,
             planned = _parse_review_date(planned_raw)
             if not planned:
                 continue
+            category = _classify_status(status_raw)
+            # Completed reviews reflect their completion date (from the status
+            # cell); everything else reflects the planned date.
+            shown = _review_display_date(planned, status_raw, category)
             out.append({
                 "name": full,
                 "email": email,
                 "programme": programme_fn(email, full),
                 "metric": metric,
-                "status": _classify_status(status_raw),
-                "date": planned.isoformat(),
+                "status": category,
+                "date": shown.isoformat(),
             })
 
     out.sort(key=lambda x: (x["name"], x["date"]))
