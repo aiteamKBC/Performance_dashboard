@@ -79,9 +79,9 @@ export default function CoachSummaryTable({ records, onWeekSelect, onPrev, onNex
         </div>
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "var(--space-4)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", fontSize: "var(--text-xs)" }}>
-            <span className="badge badge--success">Perfect / &lt;15%</span>
-            <span className="badge badge--warning">Warning</span>
-            <span className="badge badge--danger">Critical</span>
+            <span className="badge badge--success">Accepted / &lt;15%</span>
+            <span className="badge badge--warning">Warning / 15–25%</span>
+            <span className="badge badge--danger">Critical / ≥25%</span>
           </div>
           <span className="tabular-nums" style={{ fontSize: "var(--text-sm)", color: "var(--color-text-muted)" }}>
             {coaches.length} coaches

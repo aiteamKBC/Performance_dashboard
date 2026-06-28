@@ -99,7 +99,7 @@ export default function TestKPIsPage() {
                 status: totalUnschedOverdue === 0 ? "kpi-status--success" : totalUnschedOverdue <= 5 ? "kpi-status--warning" : "kpi-status--danger" },
             ].map((s) => {
               const statusLabel = s.status === "kpi-status--danger" ? "⚠ Needs Attention"
-                : s.status === "kpi-status--warning" ? "△ Monitor"
+                : s.status === "kpi-status--warning" ? "△ Need Attention"
                 : s.status === "kpi-status--success" ? "✓ On Track" : null;
               return (
                 <div key={s.label} className="kpi-card">

@@ -206,10 +206,20 @@ def format_week_range(year, week):
 # --------------------------------------------------------------------------
 
 # Shared WHERE fragment: active learners, real owner, not an excluded group.
+# Used for the absence-ratio aggregation (excluded groups are kept out of
+# reporting).
 _LEARNER_FILTER = (
     "lower(u.\"Program-Status\") = 'active' "
     "AND u.\"OwnerName\" IS NOT NULL AND u.\"OwnerName\" <> '' "
     "AND NOT (lower(coalesce(u.\"Group\", '')) = ANY(%(excluded)s))"
+)
+
+# Roster headcount filter: every active learner with a real owner, INCLUDING the
+# groups excluded from absence reporting. The Total Students count uses this so
+# it reflects the full active roster (e.g. 396), not just the reported groups.
+_ROSTER_FILTER = (
+    "lower(u.\"Program-Status\") = 'active' "
+    "AND u.\"OwnerName\" IS NOT NULL AND u.\"OwnerName\" <> ''"
 )
 
 
@@ -253,24 +263,6 @@ def _coach_week_rows(conn, start, end):
     return out
 
 
-def _students_in_window(conn, start, end):
-    """{owner: distinct learners with any attendance in [start, end]}.
-
-    This is the ``students_count`` shown on the table — learners who actually had
-    sessions in the displayed window (not the full active roster)."""
-    sql = """
-        SELECT u."OwnerName" AS owner, COUNT(DISTINCT a."ID") AS n
-        FROM kbc_attendance a
-        JOIN kbc_users_data u ON u."ID" = a."ID"
-        WHERE a.date >= %(start)s AND a.date <= %(end)s
-          AND {filter}
-        GROUP BY u."OwnerName"
-    """.format(filter=_LEARNER_FILTER)
-    with conn.cursor() as cur:
-        cur.execute(sql, {"start": start, "end": end, "excluded": EXCLUDED_GROUPS})
-        return {owner: int(n or 0) for owner, n in cur.fetchall()}
-
-
 def _active_coach_names(conn):
     """All active coaches (real owner, not an excluded group)."""
     sql = """
@@ -284,16 +276,18 @@ def _active_coach_names(conn):
 
 
 def _active_students_per_coach(conn):
-    """{owner: count of distinct active learners} (full roster). Kept for the
-    recompute_coach_summary management command."""
+    """{owner: count of distinct active learners} — the full active roster,
+    regardless of whether they have attendance records in any window and
+    regardless of excluded groups. Used for the table's students_count and by
+    the recompute_coach_summary management command."""
     sql = """
         SELECT u."OwnerName" AS owner, COUNT(DISTINCT u."ID") AS n
         FROM kbc_users_data u
         WHERE {filter}
         GROUP BY u."OwnerName"
-    """.format(filter=_LEARNER_FILTER)
+    """.format(filter=_ROSTER_FILTER)
     with conn.cursor() as cur:
-        cur.execute(sql, {"excluded": EXCLUDED_GROUPS})
+        cur.execute(sql, {})
         return {owner: int(n or 0) for owner, n in cur.fetchall()}
 
 
@@ -410,14 +404,10 @@ def get_attendance_weeks(count=10, before=None, after=None, today=None):
 
     with _connect() as conn:
         summary = compute_week_summary(weeks, conn=conn)
-        # students_count = distinct learners who actually had sessions in the
-        # displayed window (not the full active roster).
-        if weeks:
-            win_start = week_bounds(*weeks[-1])[0]   # oldest week's Monday
-            win_end = week_bounds(*weeks[0])[1]      # newest week's Sunday
-            students = _students_in_window(conn, win_start, win_end)
-        else:
-            students = {}
+        # students_count = every active learner on the coach's roster, whether or
+        # not they have an attendance record in the displayed window. (Matches the
+        # recompute_coach_summary command.)
+        students = _active_students_per_coach(conn)
         active_coaches = _active_coach_names(conn)
 
     week_keys = [f"{y}-{w}" for (y, w) in weeks]
