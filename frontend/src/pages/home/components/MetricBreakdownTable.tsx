@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DrillLearnerRow, ReviewRow } from "@/services/coachesLateness";
 import { downloadXlsx, type Cell } from "@/utils/xlsx";
-import { otjhTarget, otjhVariance, otjhStatusFromVariance, formatHours } from "@/utils/otjh";
+import { otjhTarget, otjhVariance, otjhStatusFromVariance, formatHours, parseProgressHours } from "@/utils/otjh";
 
 const STATUS_COLOR: Record<string, string> = {
   "On Track": "#16A34A",
@@ -96,6 +96,33 @@ function windowTag(dateIso: string, today: Date): string {
   return "Older";
 }
 
+// Sort key for a row given the clicked column header. Returns a number for the
+// numeric/date columns (so they sort numerically) or a lowercased string for the
+// text columns; null for "no value" so those rows always sort to the bottom.
+function sortValue(r: MetricRow, header: string): string | number | null {
+  switch (header) {
+    case "Learner": return (r.name || "").toLowerCase();
+    case "Programme": return (r.programme || "").toLowerCase();
+    case "Metric": return (r.metric || "").toLowerCase();
+    case "Status": return (r.status || "").toLowerCase();
+    case "Window":
+    case "Date": {
+      if (!r.date) return null;
+      const t = new Date(r.date + "T00:00:00").getTime();
+      return Number.isNaN(t) ? null : t;
+    }
+    case "Completed": return r.completed ?? null;
+    case "Target": return r.targetHours ?? null;
+    case "Progress-Hours": return parseProgressHours(r.progressHours ?? "");
+    case "ProgressVariance": {
+      if (!r.progressVariance) return null;
+      const n = Number(r.progressVariance.replace(/[^0-9.\-]/g, ""));
+      return Number.isNaN(n) ? null : n;
+    }
+    default: return null;
+  }
+}
+
 // Whether a date falls within the last `months` (inclusive of today, no future).
 function withinPeriod(dateIso: string, today: Date, months: number | null): boolean {
   if (months == null) return true;
@@ -174,15 +201,28 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
   const [programme, setProgramme] = useState("ALL");
   const [status, setStatus] = useState("ALL");
   const [period, setPeriod] = useState("ALL");
+  // Column sort — null means natural (unsorted) order.
+  const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
 
   // Follow the metric chosen by a KPI card click on the parent page, clearing
   // any status/period that belonged to the previous metric.
-  useEffect(() => { setMetric(initialMetric); setStatus("ALL"); setPeriod("ALL"); }, [initialMetric]);
+  useEffect(() => { setMetric(initialMetric); setStatus("ALL"); setPeriod("ALL"); setSort(null); }, [initialMetric]);
 
   const changeMetric = (value: string) => {
     setMetric(value);
     setStatus("ALL");
     setPeriod("ALL");
+    setSort(null);   // columns differ between OTJH and the other metrics
+  };
+
+  // Clicking a header sorts by it ascending; clicking the active header again
+  // flips the direction.
+  const toggleSort = (header: string) => {
+    setSort((cur) =>
+      cur?.key === header
+        ? { key: header, dir: cur.dir === "asc" ? "desc" : "asc" }
+        : { key: header, dir: "asc" },
+    );
   };
 
   const reviewMode = REVIEW_METRICS.has(metric);          // time-period filter (dated rows only)
@@ -191,7 +231,7 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
 
   const rows = useMemo(() => {
     const periodMonths = PERIODS.find((p) => p.key === period)?.months ?? null;
-    return allRows.filter((r) => {
+    const filtered = allRows.filter((r) => {
       if (metric !== "ALL" && r.metricKey !== metric) return false;
       if (programme !== "ALL" && r.programme !== programme) return false;
       // Status filter applies to the selected metric (PR/MCM/OTJH).
@@ -200,7 +240,21 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
       if (reviewMode && periodMonths != null && !withinPeriod(r.date, today, periodMonths)) return false;
       return true;
     });
-  }, [allRows, metric, programme, status, period, statusMode, reviewMode, today]);
+
+    if (!sort) return filtered;
+    return [...filtered].sort((a, b) => {
+      const av = sortValue(a, sort.key);
+      const bv = sortValue(b, sort.key);
+      // Missing values always sink to the bottom, regardless of direction.
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;
+      if (bv == null) return -1;
+      const diff = typeof av === "number" && typeof bv === "number"
+        ? av - bv
+        : String(av).localeCompare(String(bv));
+      return sort.dir === "asc" ? diff : -diff;
+    });
+  }, [allRows, metric, programme, status, period, statusMode, reviewMode, today, sort]);
 
   const tableRef = useRef<HTMLTableElement>(null);
   const [exporting, setExporting] = useState(false);
@@ -401,17 +455,37 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
         </div>
       </div>
 
-      <div className="table-scroll themed-scrollbar">
+      <div className="table-scroll themed-scrollbar" style={{ maxHeight: "70vh", overflow: "auto" }}>
         <table className="data-table" ref={tableRef}>
           <thead>
             <tr>
-              {headers.map((h) => (
-                <th key={h} scope="col" style={{
-                  textAlign: "left", padding: "var(--space-2) var(--space-3)", fontSize: "var(--text-xs)",
-                  color: "var(--color-text-muted)", background: "var(--color-canvas)",
-                  textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap",
-                }}>{h}</th>
-              ))}
+              {headers.map((h) => {
+                const active = sort?.key === h;
+                return (
+                  <th
+                    key={h}
+                    scope="col"
+                    aria-sort={active ? (sort!.dir === "asc" ? "ascending" : "descending") : undefined}
+                    onClick={() => toggleSort(h)}
+                    title={`Sort by ${h}`}
+                    style={{
+                      textAlign: "left", padding: "var(--space-2) var(--space-3)", fontSize: "var(--text-xs)",
+                      color: active ? "var(--color-accent)" : "var(--color-text-muted)", background: "var(--color-canvas)",
+                      textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap",
+                      cursor: "pointer", userSelect: "none",
+                      position: "sticky", top: 0, zIndex: 2,
+                      boxShadow: "inset 0 -1px 0 var(--color-border)",
+                    }}
+                  >
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                      {h}
+                      <span style={{ fontSize: 9, opacity: active ? 1 : 0.35 }} aria-hidden="true">
+                        {active ? (sort!.dir === "asc" ? "▲" : "▼") : "↕"}
+                      </span>
+                    </span>
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
