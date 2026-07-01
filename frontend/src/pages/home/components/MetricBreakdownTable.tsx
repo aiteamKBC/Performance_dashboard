@@ -201,6 +201,7 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
   const [programme, setProgramme] = useState("ALL");
   const [status, setStatus] = useState("ALL");
   const [period, setPeriod] = useState("ALL");
+  const [search, setSearch] = useState("");   // free-text learner name/email filter
   // Column sort — null means natural (unsorted) order.
   const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
 
@@ -231,6 +232,7 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
 
   const rows = useMemo(() => {
     const periodMonths = PERIODS.find((p) => p.key === period)?.months ?? null;
+    const query = search.trim().toLowerCase();
     const filtered = allRows.filter((r) => {
       if (metric !== "ALL" && r.metricKey !== metric) return false;
       if (programme !== "ALL" && r.programme !== programme) return false;
@@ -238,6 +240,8 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
       if (statusMode && status !== "ALL" && r.status !== status) return false;
       // Time period only constrains dated PR/MCM rows.
       if (reviewMode && periodMonths != null && !withinPeriod(r.date, today, periodMonths)) return false;
+      // Free-text search matches the learner name or email.
+      if (query && !`${r.name} ${r.email}`.toLowerCase().includes(query)) return false;
       return true;
     });
 
@@ -254,7 +258,7 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
         : String(av).localeCompare(String(bv));
       return sort.dir === "asc" ? diff : -diff;
     });
-  }, [allRows, metric, programme, status, period, statusMode, reviewMode, today, sort]);
+  }, [allRows, metric, programme, status, period, search, statusMode, reviewMode, today, sort]);
 
   const tableRef = useRef<HTMLTableElement>(null);
   const [exporting, setExporting] = useState(false);
@@ -300,6 +304,7 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
         programme !== "ALL" ? `Programme: ${programme}` : null,
         statusMode && status !== "ALL" ? `Status: ${status}` : null,
         reviewMode && period !== "ALL" ? `Period: ${PERIODS.find((p) => p.key === period)?.label}` : null,
+        search.trim() ? `Search: "${search.trim()}"` : null,
       ].filter(Boolean);
       sub.textContent = `${rows.length} row${rows.length === 1 ? "" : "s"} · ${filterBits.join(" · ")} · Exported ${new Date().toLocaleString()}`;
 
@@ -396,6 +401,46 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
 
         <div style={{ marginLeft: "auto", display: "flex", flexWrap: "wrap", gap: "var(--space-3)", alignItems: "flex-end" }}>
           <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
+            Search learner
+            <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+              <i
+                className="ri-search-line"
+                aria-hidden="true"
+                style={{ position: "absolute", left: 8, fontSize: 13, color: "var(--color-text-muted)", pointerEvents: "none" }}
+              />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Name or email…"
+                aria-label="Search learner by name or email"
+                style={{
+                  ...selectStyle,
+                  cursor: "text",
+                  paddingLeft: 26,
+                  paddingRight: search ? 24 : "var(--space-2)",
+                  minWidth: 180,
+                }}
+              />
+              {search && (
+                <button
+                  type="button"
+                  onClick={() => setSearch("")}
+                  aria-label="Clear search"
+                  title="Clear search"
+                  style={{
+                    position: "absolute", right: 4, display: "flex", alignItems: "center",
+                    border: "none", background: "transparent", cursor: "pointer", padding: 2,
+                    color: "var(--color-text-muted)", fontSize: 14, lineHeight: 1,
+                  }}
+                >
+                  <i className="ri-close-line" aria-hidden="true" />
+                </button>
+              )}
+            </div>
+          </label>
+
+          <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
             Metric
             <select value={metric} onChange={(e) => changeMetric(e.target.value)} style={selectStyle}>
               {METRICS.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
@@ -459,8 +504,9 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
         <table className="data-table" ref={tableRef}>
           <thead>
             <tr>
-              {headers.map((h) => {
+              {headers.map((h, hi) => {
                 const active = sort?.key === h;
+                const frozen = hi === 0;   // freeze the Learner column horizontally
                 return (
                   <th
                     key={h}
@@ -473,8 +519,13 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
                       color: active ? "var(--color-accent)" : "var(--color-text-muted)", background: "var(--color-canvas)",
                       textTransform: "uppercase", letterSpacing: "0.04em", whiteSpace: "nowrap",
                       cursor: "pointer", userSelect: "none",
-                      position: "sticky", top: 0, zIndex: 2,
-                      boxShadow: "inset 0 -1px 0 var(--color-border)",
+                      // Sticky top for the header row; the Learner column is also sticky
+                      // left (top-left corner), so it needs a higher z-index than the
+                      // rest of the header to stay above the sticky body cells too.
+                      position: "sticky", top: 0, left: frozen ? 0 : undefined, zIndex: frozen ? 3 : 2,
+                      boxShadow: frozen
+                        ? "inset 0 -1px 0 var(--color-border), inset -1px 0 0 var(--color-border)"
+                        : "inset 0 -1px 0 var(--color-border)",
                     }}
                   >
                     <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
@@ -494,7 +545,17 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
             ) : (
               rows.map((r, i) => (
                 <tr key={`${r.email || r.name}-${r.metricKey}-${i}`} style={{ background: i % 2 === 0 ? "transparent" : "rgba(0,0,0,0.015)" }}>
-                  <th scope="row" style={{ padding: "var(--space-2) var(--space-3)", whiteSpace: "nowrap", fontWeight: "var(--font-medium)", color: "var(--color-text-primary)", fontSize: "var(--text-xs)", textAlign: "left" }}>
+                  <th scope="row" style={{
+                    padding: "var(--space-2) var(--space-3)", whiteSpace: "nowrap",
+                    fontWeight: "var(--font-medium)", color: "var(--color-text-primary)",
+                    fontSize: "var(--text-xs)", textAlign: "left",
+                    // Freeze this column: an opaque background is required so the
+                    // horizontally-scrolling cells don't show through. Match the
+                    // row striping (odd rows = white + the rgba(0,0,0,0.015) overlay ≈ #FBFBFB).
+                    position: "sticky", left: 0, zIndex: 1,
+                    background: i % 2 === 0 ? "var(--color-surface)" : "#FBFBFB",
+                    boxShadow: "inset -1px 0 0 var(--color-border)",
+                  }}>
                     {r.name}
                     {r.email && <div style={{ fontSize: 10, color: "var(--color-text-muted)", fontWeight: 400 }}>{r.email}</div>}
                   </th>

@@ -116,10 +116,11 @@ export default function CoachDetailPage() {
     return () => { cancelled = true; };
   }, [id]);
 
-  // OTJH chart bands, derived from the same variance-based status as the Metric
-  // Breakdown table (computed per learner from the drill rows), so the two stay
-  // in sync. Falls back to the record's source counts until the drill loads.
-  const otjhData = useMemo(() => {
+  // OTJH band counts, derived from the same variance-based status as the Metric
+  // Breakdown table (computed per learner from the drill rows), so the KPI card,
+  // the pie chart, and the table all show the same numbers. Falls back to the
+  // record's source counts until the drill loads.
+  const otjhCounts = useMemo(() => {
     const counts: Record<string, number> = { "On Track": 0, "Need Attention": 0, "At Risk": 0 };
     if (drill?.per_learner?.length) {
       for (const l of drill.per_learner) {
@@ -132,12 +133,16 @@ export default function CoachDetailPage() {
       counts["Need Attention"] = record.otjhNeedAttention;
       counts["At Risk"] = record.otjhAtRisk;
     }
-    return [
-      { name: "On Track", value: counts["On Track"], color: STATUS_COLOR["On Track"] },
-      { name: "Need Attention", value: counts["Need Attention"], color: STATUS_COLOR["Need Attention"] },
-      { name: "At Risk", value: counts["At Risk"], color: STATUS_COLOR["At Risk"] },
-    ].filter((d) => d.value > 0);
+    return counts;
   }, [record, drill]);
+
+  const otjhData = useMemo(() => (
+    [
+      { name: "On Track", value: otjhCounts["On Track"], color: STATUS_COLOR["On Track"] },
+      { name: "Need Attention", value: otjhCounts["Need Attention"], color: STATUS_COLOR["Need Attention"] },
+      { name: "At Risk", value: otjhCounts["At Risk"], color: STATUS_COLOR["At Risk"] },
+    ].filter((d) => d.value > 0)
+  ), [otjhCounts]);
 
   // Monthly PR/MCM completion-rate trend, derived from the per-review rows in
   // the drill response. Each review slot counts toward its planned month's
@@ -264,7 +269,7 @@ export default function CoachDetailPage() {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: "var(--space-3)" }}>
               <KpiCard label="Total Learners" value={record.totalLearners} onClick={() => scrollToBreakdown("ALL")} />
               <KpiCard label="Learners Engagement" value={`${record.learnerEngagement}%`} sub={`${record.recentSubmitters} recent submitters`} onClick={() => scrollToBreakdown("RECENT")} />
-              <KpiCard label="OTJH At Risk" value={record.otjhAtRisk} sub={`${record.otjhNeedAttention} need attention`} onClick={() => scrollToBreakdown("OTJH")} />
+              <KpiCard label="OTJH At Risk" value={otjhCounts["At Risk"]} sub={`${otjhCounts["Need Attention"]} need attention`} onClick={() => scrollToBreakdown("OTJH")} />
               <KpiCard label="PR 12-Week" value={`${record.prOverallCompletionRate}%`} sub={`${record.prOverallCompleted}/${record.prOverallRequired} completed`} onClick={() => scrollToBreakdown("PR")} />
               <KpiCard label="Evidence Pending" value={record.pending} sub={`${record.evidenceAccepted} accepted`} onClick={() => scrollToBreakdown("PENDING")} />
               <KpiCard label="Referred Closure" value={record.referredClosure} onClick={() => scrollToBreakdown("CLOSURE")} />
