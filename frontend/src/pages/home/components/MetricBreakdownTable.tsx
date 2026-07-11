@@ -273,32 +273,29 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
     ? ["Learner", "Programme", "Metric", "Status", "Completed", "Target", "Progress-Hours", "ProgressVariance"]
     : ["Learner", "Programme", "Metric", "Status", "Window", "Date"];
 
-  // Screenshot the current (filtered) table and save it as a PDF. html2canvas
-  // and jsPDF are imported lazily so they stay out of the main bundle. We
-  // capture an off-screen clone of the table — sized to its full un-scrolled
-  // width and prefixed with a title + active-filter summary — so nothing is
-  // clipped by the horizontal scroll container, then tile the resulting image
-  // across as many landscape pages as the table is tall.
+  // Render the current (filtered) rows to a PDF as a real vector table using
+  // jsPDF + jspdf-autotable (both imported lazily so they stay out of the main
+  // bundle). Unlike the old html2canvas screenshot approach, this draws from the
+  // underlying `rows` data, so the output is crisp, laid out to the page rather
+  // than the screen, paginated cleanly with a repeated header row, and identical
+  // regardless of the viewport / device the export was triggered from.
   const handleExport = async () => {
-    const table = tableRef.current;
-    if (!table || exporting || rows.length === 0) return;
+    if (exporting || rows.length === 0) return;
     setExporting(true);
     try {
-      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
-        import("html2canvas"),
+      const [{ jsPDF }, autoTableMod] = await Promise.all([
         import("jspdf"),
+        import("jspdf-autotable"),
       ]);
+      const autoTable = autoTableMod.default;
+      type CellHookData = Parameters<NonNullable<Parameters<typeof autoTable>[1]["didParseCell"]>>[0];
 
-      const fullWidth = table.scrollWidth;
-      const wrapper = document.createElement("div");
-      wrapper.style.cssText = `position:fixed;left:-100000px;top:0;width:${fullWidth}px;padding:20px;background:#ffffff;`;
+      const pdf = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+      const pageW = pdf.internal.pageSize.getWidth();
+      const marginX = 32;
 
-      const heading = document.createElement("div");
-      heading.style.cssText = "font:600 16px sans-serif;color:#0F1629;margin-bottom:4px;";
-      heading.textContent = coachName ? `${coachName} — Metric Breakdown` : "Metric Breakdown";
-
-      const sub = document.createElement("div");
-      sub.style.cssText = "font:400 11px sans-serif;color:#5A6480;margin-bottom:12px;";
+      // Title + active-filter summary line.
+      const title = coachName ? `${coachName} — Metric Breakdown` : "Metric Breakdown";
       const filterBits = [
         `Metric: ${metricLabel}`,
         programme !== "ALL" ? `Programme: ${programme}` : null,
@@ -306,38 +303,63 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
         reviewMode && period !== "ALL" ? `Period: ${PERIODS.find((p) => p.key === period)?.label}` : null,
         search.trim() ? `Search: "${search.trim()}"` : null,
       ].filter(Boolean);
-      sub.textContent = `${rows.length} row${rows.length === 1 ? "" : "s"} · ${filterBits.join(" · ")} · Exported ${new Date().toLocaleString()}`;
+      const subtitle = `${rows.length} row${rows.length === 1 ? "" : "s"} · ${filterBits.join(" · ")} · Exported ${new Date().toLocaleString()}`;
 
-      wrapper.appendChild(heading);
-      wrapper.appendChild(sub);
-      wrapper.appendChild(table.cloneNode(true));
-      document.body.appendChild(wrapper);
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(14);
+      pdf.setTextColor("#0F1629");
+      pdf.text(title, marginX, 40);
 
-      let canvas: HTMLCanvasElement;
-      try {
-        canvas = await html2canvas(wrapper, { scale: 2, backgroundColor: "#ffffff", windowWidth: fullWidth + 40 });
-      } finally {
-        document.body.removeChild(wrapper);
-      }
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(9);
+      pdf.setTextColor("#5A6480");
+      pdf.text(subtitle, marginX, 56, { maxWidth: pageW - marginX * 2 });
 
-      const pdf = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
-      const pageW = pdf.internal.pageSize.getWidth();
-      const pageH = pdf.internal.pageSize.getHeight();
-      const imgW = pageW;
-      const imgH = (canvas.height * imgW) / canvas.width;
-      const imgData = canvas.toDataURL("image/png");
+      // Columns + rows built from the underlying data, mirroring the on-screen
+      // (and Excel) column set. Learner name + email stack in one cell.
+      const head = otjhView
+        ? [["Learner", "Programme", "Metric", "Status", "Completed", "Target", "Progress Hours", "Progress Variance"]]
+        : [["Learner", "Programme", "Metric", "Status", "Window", "Date"]];
 
-      // Tile a tall image across multiple pages.
-      let heightLeft = imgH;
-      let position = 0;
-      pdf.addImage(imgData, "PNG", 0, position, imgW, imgH);
-      heightLeft -= pageH;
-      while (heightLeft > 0) {
-        position = heightLeft - imgH;
-        pdf.addPage();
-        pdf.addImage(imgData, "PNG", 0, position, imgW, imgH);
-        heightLeft -= pageH;
-      }
+      const body = rows.map((r) => {
+        const learner = r.email ? `${r.name}\n${r.email}` : r.name;
+        return otjhView
+          ? [
+              learner, r.programme || "", r.metric, r.status,
+              r.completed != null ? String(r.completed) : "",
+              r.targetHours != null ? String(r.targetHours) : "",
+              r.progressHours || "", r.progressVariance || "",
+            ]
+          : [
+              learner, r.programme || "", r.metric, r.status,
+              REVIEW_METRICS.has(r.metricKey) ? windowTag(r.date, today) : "",
+              r.date || "",
+            ];
+      });
+
+      autoTable(pdf, {
+        head,
+        body,
+        startY: 70,
+        margin: { left: marginX, right: marginX, top: 70 },
+        styles: { fontSize: 8, cellPadding: 4, overflow: "linebreak", valign: "middle", lineColor: "#E5E7EB", lineWidth: 0.5 },
+        headStyles: { fillColor: "#F1F5F9", textColor: "#0F1629", fontStyle: "bold", fontSize: 8 },
+        alternateRowStyles: { fillColor: "#F8FAFC" },
+        // Let autoTable size columns to the page width; give the learner column
+        // more room since it carries two lines.
+        columnStyles: { 0: { cellWidth: otjhView ? 130 : 160 } },
+        // Colour the Status cell text to match the on-screen status pills.
+        didParseCell: (data: CellHookData) => {
+          if (data.section === "body" && data.column.index === 3) {
+            const value = data.cell.text.join(" ");
+            const color = STATUS_COLOR[value];
+            if (color) {
+              data.cell.styles.textColor = color;
+              data.cell.styles.fontStyle = "bold";
+            }
+          }
+        },
+      });
 
       const slug = (coachName || "metric-breakdown").replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase();
       pdf.save(`${slug}-metric-breakdown.pdf`);

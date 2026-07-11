@@ -72,6 +72,9 @@ export interface ActionPlan {
   notes: string;
   creator_name: string | null;
   saved_date: string | null;
+  // Whether this plan has an attached file. The file blob itself is fetched on
+  // demand via fetchActionPlanFile() so lists stay lightweight.
+  has_attachment: boolean;
 }
 
 export const fetchActionPlans = async (coach: string): Promise<ActionPlan[]> => {
@@ -83,12 +86,26 @@ export const fetchActionPlans = async (coach: string): Promise<ActionPlan[]> => 
   return response.json();
 };
 
+// Fetch one plan's attached file (a base64 data URL) on demand. Returns null
+// when the plan has no attachment.
+export const fetchActionPlanFile = async (id: number): Promise<string | null> => {
+  const params = new URLSearchParams({ id: String(id) });
+  const response = await fetch(buildApiUrl(`/api/action-plans/file/?${params.toString()}`));
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new Error(`Error: ${response.status} ${response.statusText}`);
+  }
+  const body = await response.json();
+  return body?.attached_file ?? null;
+};
+
 export const createActionPlan = async (input: {
   coach: string;
   title: string;
   notes: string;
   creator?: string;
   caseOwnerId?: number | null;
+  attachedFile?: string | null;
 }): Promise<ActionPlan> => {
   const response = await fetch(buildApiUrl('/api/action-plans/'), {
     method: 'POST',
@@ -99,6 +116,7 @@ export const createActionPlan = async (input: {
       notes: input.notes,
       creator: input.creator ?? '',
       case_owner_id: input.caseOwnerId ?? null,
+      attached_file: input.attachedFile ?? null,
     }),
   });
   if (!response.ok) {

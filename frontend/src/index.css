@@ -598,6 +598,15 @@ p, li { line-height: var(--leading-normal); }
 .data-table th:hover { color: var(--color-text-primary); }
 .data-table th[aria-sort] { color: var(--color-accent); }
 
+/* Row-header cells (e.g. the frozen Learner column) carry data, not sort
+   controls — keep their text selectable and normally styled. */
+.data-table th[scope="row"] {
+  cursor: auto;
+  user-select: text;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
 .data-table td {
   padding: var(--space-3) var(--space-4);
   border-bottom: 1px solid var(--color-border-light);
