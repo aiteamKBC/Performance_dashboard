@@ -7,7 +7,9 @@ from .models import CoachesLateness, CoachSummary
 from .serializers import CoachesLatenessSerializer, CoachSummarySerializer
 from .lateness_compute import compute_coaches_lateness, compute_coach_drill
 from .attendance_compute import get_attendance_weeks, get_attendance_drill
-from .action_plan import create_action_plan, list_action_plans, delete_action_plan
+from .action_plan import (
+    create_action_plan, list_action_plans, delete_action_plan, get_action_plan_file,
+)
 
 class CoachesLatenessViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = CoachesLateness.objects.all()
@@ -36,8 +38,11 @@ class ActionPlanView(APIView):
     """Coach action plans (title + notes), stored in the KBC database.
 
     GET  ?coach=<name>            -> list a coach's action plans (newest first).
-    POST {coach, title, notes, case_owner_id?} -> create one.
+    POST {coach, title, notes, case_owner_id?, attached_file?} -> create one.
     """
+    # Cap the stored attachment (a base64 data URL). Base64 inflates the raw
+    # bytes by ~33%, so this ≈ 105 MB of original file (frontend caps raw at 100 MB).
+    MAX_ATTACHED_CHARS = 140 * 1024 * 1024
     def get(self, request):
         coach = request.query_params.get("coach")
         if not coach:
@@ -59,8 +64,15 @@ class ActionPlanView(APIView):
         except (TypeError, ValueError):
             case_owner_id = None
         creator = (data.get("creator") or "").strip() or None
+        attached_file = data.get("attached_file") or None
+        if attached_file is not None:
+            if not isinstance(attached_file, str) or not attached_file.startswith("data:"):
+                return Response({"detail": "attached_file must be a data URL"}, status=400)
+            if len(attached_file) > self.MAX_ATTACHED_CHARS:
+                return Response({"detail": "attached file is too large (max 100 MB)"}, status=400)
         created = create_action_plan(
             coach, title, notes, case_owner_id=case_owner_id, creator_name=creator,
+            attached_file=attached_file,
         )
         return Response(created, status=201)
 
@@ -73,6 +85,24 @@ class ActionPlanView(APIView):
         if not delete_action_plan(plan_id):
             return Response({"detail": "not found"}, status=404)
         return Response(status=204)
+
+
+class ActionPlanFileView(APIView):
+    """The attached file (base64 data URL) for one action plan, fetched on
+    demand so the list endpoint can stay lightweight.
+
+    GET ?id=<plan_id> -> {"attached_file": "data:...;base64,..."}
+    """
+    def get(self, request):
+        plan_id = request.query_params.get("id")
+        try:
+            plan_id = int(plan_id)
+        except (TypeError, ValueError):
+            return Response({"detail": "a valid id is required"}, status=400)
+        data_url = get_action_plan_file(plan_id)
+        if not data_url:
+            return Response({"detail": "not found"}, status=404)
+        return Response({"attached_file": data_url})
 
 
 class CoachSummaryViewSet(viewsets.ReadOnlyModelViewSet):

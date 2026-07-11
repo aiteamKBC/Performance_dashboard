@@ -61,6 +61,11 @@ MIDDLEWARE = [
 
 CORS_ALLOW_ALL_ORIGINS = True
 
+# Action-plan file attachments are posted as base64 data URLs in the JSON body,
+# so raise Django's request-body cap above the default 2.5 MB to accommodate them
+# (kept in step with ActionPlanView.MAX_ATTACHED_CHARS: 100 MB raw ≈ 133 MB base64).
+DATA_UPLOAD_MAX_MEMORY_SIZE = 160 * 1024 * 1024
+
 ROOT_URLCONF = 'config.urls'
 
 TEMPLATES = [
