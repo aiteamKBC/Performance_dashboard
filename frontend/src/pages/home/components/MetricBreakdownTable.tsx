@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DrillLearnerRow, ReviewRow } from "@/services/coachesLateness";
 import { downloadXlsx, type Cell } from "@/utils/xlsx";
-import { otjhVariance, otjhStatusFromVariance, parseProgressHours } from "@/utils/otjh";
+import { otjhStatusFromVariance, parseProgressHours } from "@/utils/otjh";
 
 const STATUS_COLOR: Record<string, string> = {
   "On Track": "#16A34A",
@@ -151,10 +151,11 @@ function buildRows(learners: DrillLearnerRow[], reviewRows: ReviewRow[]): Metric
   for (const l of learners) {
     const base = { name: l.name, email: l.email, programme: l.programme };
     if (l.otjh_status) {
-      // Target comes straight from the source "Target" column (l.otjh_target)
-      // rather than being derived from completed − progress-hours.
+      // Target, Progress-Hours and ProgressVariance all come straight from
+      // their source columns rather than being derived.
       const tgtHours = parseProgressHours(l.otjh_target);
-      const variance = otjhVariance(l.completed, l.otjh_progress_hours);
+      // Numeric form of the source variance, for status banding.
+      const variance = parseProgressHours(l.otjh_progress_variance);
       out.push({
         ...base, metric: "OTJH", metricKey: "OTJH",
         status: otjhStatusFromVariance(variance, l.otjh_status), date: "",
@@ -162,7 +163,7 @@ function buildRows(learners: DrillLearnerRow[], reviewRows: ReviewRow[]): Metric
         target: l.otjh_target || "",
         targetHours: tgtHours == null ? undefined : Math.round(tgtHours * 10) / 10,
         progressHours: l.otjh_progress_hours,
-        progressVariance: variance == null ? "" : `${Math.round(variance)}%`,
+        progressVariance: l.otjh_progress_variance || "",
       });
     }
     if (l.submitted > 0) out.push({ ...base, metric: "Engaged", metricKey: "ENGAGED", status: "Engaged", date: l.last_sub });
