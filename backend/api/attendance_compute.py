@@ -1,25 +1,34 @@
 """
-Attendance computation from the KBC main database (kbc_main_database_url).
+Attendance computation for the Coach Summary page.
 
-The dashboard's absence figures are derived from the ``kbc_attendance`` table,
-which holds one row per student per session:
+Roster - the same active learners as the Coaches Performance page (see
+lateness_compute): every *active* learner on the Aptem extract
+(``aptem_auto_extracting``; Alfanar accounts and excluded owners dropped; coach
+taken from Aptem, or from the LMS when the Aptem owner is a placeholder) plus
+the LMS-only learners (Active / Delivery on the new LMS).
 
-    ID            -> student id (links to kbc_users_data."ID")
-    date          -> session date
-    Attendance    -> 1 = attended, 0 = absent (other values are anomalies)
+Attendance - two registers, merged the way the LMS merges them
+(``kbc_sync.combined_attendance_source``): one session per learner per day per
+module, attended if either register says present.
 
-A student's coach is the ``OwnerName`` on their ``kbc_users_data`` row. We count
-only *active* learners (``Program-Status = 'active'``), matching the original
-coach_summary methodology.
+  * ``kbc_attendance`` (KBC main database) - the legacy register.
+    ``Attendance`` 0 = absent, > 0 = present, null = not counted.
+  * ``"Learner".learner_attendance_details`` (LMS database) - the LMS's Teams
+    live-session attendance. Only sessions that actually ran (occurrence
+    ``completed``) count, and a learner not expected at the session (not on the
+    module roster) counts only if they attended.
+
+A record is linked to a roster learner by Aptem id, then LMS learner id, then
+email.
 
 Weeks use the ISO-8601 week scheme (weeks run Monday-Sunday):
 
     each week runs Monday-Sunday; the week number and year are the ISO
     calendar values, e.g. ISO 2026-W26 = Mon 22 Jun - Sun 28 Jun 2026.
 
-The absence ratio for a (coach, week) is::
+The absence ratio for a (coach, week) is per learner::
 
-    absent_session_rows / counted_session_rows   (counted = Attendance in (0,1))
+    learners who attended none of their sessions / learners with a session
 
 expressed as a percentage. "vs company" is the coach's share of all company
 absences that week (coach_absent / company_absent), as a percentage, so the
@@ -32,10 +41,14 @@ import os
 
 import psycopg
 
-# Attendance is per session row: a value > 0 means the learner attended that
-# session. Per (coach, learner, week) we keep the MAX, so a learner counts as
-# "present" for the week if they attended ANY session, and "absent" only if they
-# missed every session they had that week. (Mirrors the n8n Attendence.js logic.)
+from .lateness_compute import (
+    _clean, _fetch_dicts, _is_alfanar, _is_excluded_owner, _lower, _owner_resolver,
+)
+from .lms_source import get_lms_data
+
+# Per (learner, week) a learner counts as "present" if they attended ANY session
+# that week, and "absent" only if they missed every session they had.
+# (Mirrors the n8n Attendence.js logic.)
 
 # Reporting timezone — "today" (and therefore the visible week window) is
 # anchored to this zone, matching the n8n node.
@@ -43,12 +56,6 @@ TIMEZONE = "Africa/Cairo"
 
 # The earliest week the report covers (a Monday). Weeks before this are hidden.
 START_FROM = date(2026, 3, 9)
-
-# Learner groups excluded from absence reporting (compared case-insensitively).
-EXCLUDED_GROUPS = [
-    "pcp - november 2025 (alfanar)",
-    "me level 4 - january 2025",
-]
 
 
 def _today():
@@ -65,6 +72,13 @@ def _kbc_dsn():
 
 def _connect():
     return psycopg.connect(_kbc_dsn())
+
+
+def _lms_connect():
+    dsn = os.environ.get("LMS_DATABASE_URL")
+    if not dsn:
+        raise RuntimeError("LMS_DATABASE_URL is not configured in the environment.")
+    return psycopg.connect(dsn)
 
 
 # --------------------------------------------------------------------------
@@ -202,169 +216,206 @@ def format_week_range(year, week):
 
 
 # --------------------------------------------------------------------------
-# Core SQL aggregation
+# Roster, attendance and aggregation
 # --------------------------------------------------------------------------
 
-# Shared WHERE fragment: active learners, real owner, not an excluded group.
-# Used for the absence-ratio aggregation (excluded groups are kept out of
-# reporting).
-_LEARNER_FILTER = (
-    "lower(u.\"Program-Status\") = 'active' "
-    "AND u.\"OwnerName\" IS NOT NULL AND u.\"OwnerName\" <> '' "
-    "AND NOT (lower(coalesce(u.\"Group\", '')) = ANY(%(excluded)s))"
-)
+def _active_learners():
+    """The Coaches Performance roster: one dict per active learner with their
+    coach, Aptem id / LMS id, name, email and group."""
+    lms = get_lms_data()
+    resolve = _owner_resolver(lms["coach_by_email"])
+    learners = []
+    rows = _fetch_dicts(
+        'SELECT "ID", "FullName", "Email", "OwnerName", "Program-Status", "Group" '
+        'FROM aptem_auto_extracting'
+    )
+    for r in rows:
+        if _lower(r.get("Program-Status")) != "active" or _is_alfanar(r.get("Email")):
+            continue
+        owner, _ = resolve(r.get("OwnerName"), r.get("Email"))
+        if _is_excluded_owner(owner):
+            continue
+        learners.append({
+            "coach": owner,
+            "aptem_id": r.get("ID"),
+            "lms_id": None,
+            "name": _clean(r.get("FullName")) or "Unknown Learner",
+            "email": _lower(r.get("Email")),
+            "group": _clean(r.get("Group")),
+        })
+    for x in lms["extras"]:
+        if _is_excluded_owner(x["coach"]):
+            continue
+        learners.append({
+            "coach": x["coach"],
+            "aptem_id": None,
+            "lms_id": x["lms_id"],
+            "name": x["name"],
+            "email": _lower(x["email"]),
+            "group": x["programme"],
+        })
+    for i, l in enumerate(learners):
+        l["key"] = i
+    return learners
 
-# Roster headcount filter: every active learner with a real owner, INCLUDING the
-# groups excluded from absence reporting. The Total Students count uses this so
-# it reflects the full active roster (e.g. 396), not just the reported groups.
-_ROSTER_FILTER = (
-    "lower(u.\"Program-Status\") = 'active' "
-    "AND u.\"OwnerName\" IS NOT NULL AND u.\"OwnerName\" <> ''"
-)
+
+# Invisible direction marks that some register emails carry (e.g. U+202B).
+_EMAIL_JUNK = "‎‏‪‫‬‭‮ "
 
 
-def _coach_week_rows(conn, start, end):
+def _norm_email(value):
+    return _lower(value).strip(_EMAIL_JUNK)
+
+
+def _learner_matcher(learners):
+    """Return match(aptem_id, lms_id, emails) -> roster learner (or None)."""
+    by_aptem = {int(l["aptem_id"]): l for l in learners if l["aptem_id"] is not None}
+    by_lms = {int(l["lms_id"]): l for l in learners if l["lms_id"] is not None}
+    by_email = {l["email"]: l for l in learners if l["email"]}
+
+    def match(aptem_id, lms_id, emails):
+        if aptem_id is not None and int(aptem_id) in by_aptem:
+            return by_aptem[int(aptem_id)]
+        if lms_id is not None and int(lms_id) in by_lms:
+            return by_lms[int(lms_id)]
+        for e in emails:
+            hit = by_email.get(_norm_email(e))
+            if hit:
+                return hit
+        return None
+    return match
+
+
+def _module_key(value):
+    return " ".join(_lower(value).split())
+
+
+def _attendance_sessions(learners, start, end):
+    """Roster learners' sessions between ``start`` and ``end`` (inclusive), as
+    (learner, session_date, module, attended) tuples, one per learner/day/module."""
+    with _connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT \"ID\", \"Email\", date, COALESCE(NULLIF(btrim(module), ''), lecture_name), "
+            '"Attendance" > 0 '
+            'FROM kbc_attendance '
+            'WHERE date >= %s AND date <= %s AND "Attendance" IS NOT NULL',
+            (start, end),
+        )
+        legacy = cur.fetchall()
+    with _lms_connect() as conn, conn.cursor() as cur:
+        cur.execute(
+            'SELECT l.aptem_id, d.learner_profile_id, d.learner_email, l.email, '
+            "d.session_date, d.module_title, d.attendance_status = 'present' "
+            'FROM "Learner".learner_attendance_details d '
+            'JOIN curriculum.live_session_occurrences o ON o.id = d.occurrence_id '
+            'LEFT JOIN "Learner".learners l ON l.id = d.learner_profile_id '
+            'WHERE d.session_date >= %s AND d.session_date <= %s '
+            "AND o.status = 'completed' "
+            "AND d.attendance_status IN ('present', 'absent') "
+            "AND (d.is_expected OR d.attendance_status = 'present')",
+            (start, end),
+        )
+        lms = cur.fetchall()
+
+    match = _learner_matcher(learners)
+    merged = {}
+
+    def add(learner, d, module, ok):
+        if learner is None or d is None or not _module_key(module):
+            return
+        key = (learner["key"], d, _module_key(module))
+        prev = merged.get(key)
+        merged[key] = (learner, d, prev[2] if prev else _clean(module), ok or (prev[3] if prev else False))
+
+    for aptem_id, email, d, module, ok in legacy:
+        add(match(aptem_id, None, [email]), d, module, ok)
+    for aptem_id, lms_id, email, alt_email, d, module, ok in lms:
+        add(match(aptem_id, lms_id, [email, alt_email]), d, module, ok)
+    return list(merged.values())
+
+
+def _coach_week_rows(sessions, start, end):
     """
-    Per-coach aggregation for one week, counted PER LEARNER (not per session row).
+    Per-coach aggregation for one week, counted PER LEARNER (not per session).
 
-    For each (owner, learner) in the week we take MAX(attended) — attended = 1 if
-    the learner was present (Attendance > 0) in any session that week. Then per
-    owner: ``total`` = learners who had a session that week, ``present`` = those
-    who attended at least one, ``absent`` = those who attended none.
+    A learner attended the week if they were present in any session that week.
+    Per coach: ``total`` = learners who had a session that week, ``present`` =
+    those who attended at least one, ``absent`` = those who attended none.
 
-    Returns {owner: {"total", "absent", "present"}}.
+    Returns {coach: {"total", "absent", "present"}}.
     """
-    sql = """
-        SELECT owner,
-               COUNT(*)                          AS total,
-               COUNT(*) FILTER (WHERE attended = 0) AS absent,
-               COUNT(*) FILTER (WHERE attended = 1) AS present
-        FROM (
-            SELECT u."OwnerName" AS owner,
-                   a."ID"        AS sid,
-                   MAX(CASE WHEN a."Attendance" > 0 THEN 1 ELSE 0 END) AS attended
-            FROM kbc_attendance a
-            JOIN kbc_users_data u ON u."ID" = a."ID"
-            WHERE a.date >= %(start)s AND a.date <= %(end)s
-              AND {filter}
-            GROUP BY u."OwnerName", a."ID"
-        ) per_learner
-        GROUP BY owner
-    """.format(filter=_LEARNER_FILTER)
-    with conn.cursor() as cur:
-        cur.execute(sql, {"start": start, "end": end, "excluded": EXCLUDED_GROUPS})
-        out = {}
-        for owner, total, absent, present in cur.fetchall():
-            out[owner] = {
-                "total": int(total or 0),
-                "absent": int(absent or 0),
-                "present": int(present or 0),
-            }
+    attended = {}
+    for learner, d, _module, ok in sessions:
+        if start <= d <= end:
+            k = learner["key"]
+            attended[k] = (learner["coach"], attended.get(k, (None, False))[1] or ok)
+    out = {}
+    for coach, ok in attended.values():
+        v = out.setdefault(coach, {"total": 0, "absent": 0, "present": 0})
+        v["total"] += 1
+        v["present" if ok else "absent"] += 1
     return out
 
 
-def _active_coach_names(conn):
-    """All active coaches (real owner, not an excluded group)."""
-    sql = """
-        SELECT DISTINCT u."OwnerName" AS owner
-        FROM kbc_users_data u
-        WHERE {filter}
-    """.format(filter=_LEARNER_FILTER)
-    with conn.cursor() as cur:
-        cur.execute(sql, {"excluded": EXCLUDED_GROUPS})
-        return {owner for (owner,) in cur.fetchall() if owner}
-
-
-def _active_students_per_coach(conn):
-    """{owner: count of distinct active learners} — the full active roster,
-    regardless of whether they have attendance records in any window and
-    regardless of excluded groups. Used for the table's students_count and by
+def _active_students_per_coach(learners=None):
+    """{coach: active learners on their roster}, whether or not they have an
+    attendance record in any window. Used for the table's students_count and by
     the recompute_coach_summary management command."""
-    sql = """
-        SELECT u."OwnerName" AS owner, COUNT(DISTINCT u."ID") AS n
-        FROM kbc_users_data u
-        WHERE {filter}
-        GROUP BY u."OwnerName"
-    """.format(filter=_ROSTER_FILTER)
-    with conn.cursor() as cur:
-        cur.execute(sql, {})
-        return {owner: int(n or 0) for owner, n in cur.fetchall()}
+    out = {}
+    for l in learners if learners is not None else _active_learners():
+        out[l["coach"]] = out.get(l["coach"], 0) + 1
+    return out
 
 
 def _ratio(absent, total):
     return round((absent / total) * 100, 2) if total else 0.0
 
 
-def _earliest_data_week(conn=None):
-    """(year, week) of the oldest attendance record, or None if the table is empty."""
-    own = conn is None
-    conn = conn or _connect()
-    try:
-        with conn.cursor() as cur:
-            cur.execute('SELECT MIN(date) FROM kbc_attendance')
-            row = cur.fetchone()
-        d = row[0] if row else None
-        return iso_year_week(d) if d else None
-    finally:
-        if own:
-            conn.close()
-
-
-def compute_week_summary(weeks, conn=None):
+def compute_week_summary(weeks, learners=None):
     """
     For each (year, week) in ``weeks``, compute per-coach absence ratio, absent
-    count, present count, total counted rows, and the company-wide ratio.
+    count, present count, learners with a session, and the company-wide ratio.
 
     Returns a dict keyed by "year-week" -> {
         "year", "week", "weekStart", "weekEnd",
         "company": {absent, present, total, ratio},
-        "coaches": { owner: {absent, present, total, ratio, vsCompany} },
+        "coaches": { coach: {absent, present, total, ratio, vsCompany} },
     }
     """
-    own = conn is None
-    conn = conn or _connect()
-    try:
-        result = {}
-        for year, week in weeks:
-            start, end = week_bounds(year, week)
-            per_coach = _coach_week_rows(conn, start, end)
+    learners = learners if learners is not None else _active_learners()
+    bounds = [week_bounds(y, w) for y, w in weeks]
+    sessions = _attendance_sessions(
+        learners, min(s for s, _ in bounds), max(e for _, e in bounds),
+    ) if bounds else []
 
-            comp_absent = sum(v["absent"] for v in per_coach.values())
-            comp_total = sum(v["total"] for v in per_coach.values())
-            comp_present = sum(v["present"] for v in per_coach.values())
-            comp_ratio = _ratio(comp_absent, comp_total)
+    result = {}
+    for (year, week), (start, end) in zip(weeks, bounds):
+        per_coach = _coach_week_rows(sessions, start, end)
 
-            coaches = {}
-            for owner, v in per_coach.items():
-                ratio = _ratio(v["absent"], v["total"])
-                # "vs Company" = this coach's share of all company absences that
-                # week (coach_absent / company_absent), as a percentage. The
-                # company row is therefore 100%. This matches the legacy
-                # coach_summary semantics and the frontend's badge thresholds.
-                vs = round((v["absent"] / comp_absent) * 100, 2) if comp_absent else 0.0
-                coaches[owner] = {
-                    "absent": v["absent"],
-                    "present": v["present"],
-                    "total": v["total"],
-                    "ratio": ratio,
-                    "vsCompany": vs,
-                }
+        comp_absent = sum(v["absent"] for v in per_coach.values())
+        comp_total = sum(v["total"] for v in per_coach.values())
+        comp_present = sum(v["present"] for v in per_coach.values())
 
-            meta = format_week_range(year, week)
-            result[f"{year}-{week}"] = {
-                **meta,
-                "company": {
-                    "absent": comp_absent,
-                    "present": comp_present,
-                    "total": comp_total,
-                    "ratio": comp_ratio,
-                },
-                "coaches": coaches,
-            }
-        return result
-    finally:
-        if own:
-            conn.close()
+        coaches = {}
+        for owner, v in per_coach.items():
+            # "vs Company" = this coach's share of all company absences that
+            # week (coach_absent / company_absent), as a percentage. The
+            # company row is therefore 100%. This matches the legacy
+            # coach_summary semantics and the frontend's badge thresholds.
+            vs = round((v["absent"] / comp_absent) * 100, 2) if comp_absent else 0.0
+            coaches[owner] = {**v, "ratio": _ratio(v["absent"], v["total"]), "vsCompany": vs}
+
+        result[f"{year}-{week}"] = {
+            **format_week_range(year, week),
+            "company": {
+                "absent": comp_absent,
+                "present": comp_present,
+                "total": comp_total,
+                "ratio": _ratio(comp_absent, comp_total),
+            },
+            "coaches": coaches,
+        }
+    return result
 
 
 # --------------------------------------------------------------------------
@@ -402,19 +453,18 @@ def get_attendance_weeks(count=10, before=None, after=None, today=None):
     else:
         weeks = recent_weeks(count, today)
 
-    with _connect() as conn:
-        summary = compute_week_summary(weeks, conn=conn)
-        # students_count = every active learner on the coach's roster, whether or
-        # not they have an attendance record in the displayed window. (Matches the
-        # recompute_coach_summary command.)
-        students = _active_students_per_coach(conn)
-        active_coaches = _active_coach_names(conn)
+    learners = _active_learners()
+    summary = compute_week_summary(weeks, learners=learners)
+    # students_count = every active learner on the coach's roster, whether or
+    # not they have an attendance record in the displayed window. (Matches the
+    # recompute_coach_summary command.)
+    students = _active_students_per_coach(learners)
 
     week_keys = [f"{y}-{w}" for (y, w) in weeks]
     week_meta = [format_week_range(y, w) for (y, w) in weeks]
 
-    # Every active coach, plus any coach seen in the displayed weeks.
-    owners = set(active_coaches)
+    # Every coach with active learners, plus any coach seen in the displayed weeks.
+    owners = set(students)
     for key in week_keys:
         owners.update(summary[key]["coaches"].keys())
 
@@ -506,55 +556,28 @@ def get_attendance_drill(coach_name, year=None, week=None, today=None):
     year, week = int(year), int(week)
     start, end = week_bounds(year, week)
 
-    sql = """
-        SELECT u."ID"            AS id,
-               u."FullName"      AS name,
-               u."Email"         AS email,
-               u."Group"         AS grp,
-               a.date            AS session_date,
-               a."Attendance"    AS attendance,
-               a.module          AS module
-        FROM kbc_users_data u
-        LEFT JOIN kbc_attendance a
-               ON a."ID" = u."ID"
-              AND a.date >= %(start)s AND a.date <= %(end)s
-        WHERE lower(u."Program-Status") = 'active'
-          AND u."OwnerName" = %(coach)s
-          AND NOT (lower(coalesce(u."Group", '')) = ANY(%(excluded)s))
-        ORDER BY u."FullName", a.date
-    """
-    with _connect() as conn, conn.cursor() as cur:
-        cur.execute(sql, {"coach": coach_name, "start": start, "end": end, "excluded": EXCLUDED_GROUPS})
-        rows = cur.fetchall()
+    learners = [l for l in _active_learners() if l["coach"] == coach_name]
+    sessions = sorted(_attendance_sessions(learners, start, end), key=lambda x: x[1])
 
-    # Group by student. A session counts as "attended" when Attendance > 0;
-    # 0 or null is an absence (mirrors the n8n toNum01 rule).
+    # Group by student.
     students = {}
-    for sid, name, email, grp, sdate, attendance, module in rows:
-        key = sid
-        st = students.get(key)
+    for learner, sdate, module, ok in sessions:
+        st = students.get(learner["key"])
         if st is None:
-            st = students[key] = {
-                "id": sid,
-                "name": (name or "Unknown Learner").strip(),
-                "email": (email or "").strip(),
-                "group": (grp or "").strip(),
+            st = students[learner["key"]] = {
+                "id": learner["aptem_id"] if learner["aptem_id"] is not None else learner["lms_id"],
+                "name": learner["name"],
+                "email": learner["email"],
+                "group": learner["group"],
                 "attended": 0,
                 "absent": 0,
                 "sessions": [],
             }
-        if sdate is None:
-            continue  # student had no session row this week
-        if attendance is not None and attendance > 0:
-            st["attended"] += 1
-            status = "attended"
-        else:
-            st["absent"] += 1
-            status = "absent"
+        st["attended" if ok else "absent"] += 1
         st["sessions"].append({
             "date": sdate.isoformat(),
-            "status": status,
-            "module": (module or "").strip(),
+            "status": "attended" if ok else "absent",
+            "module": module,
         })
 
     def overall_status(st):
@@ -565,7 +588,7 @@ def get_attendance_drill(coach_name, year=None, week=None, today=None):
         return "partial"
 
     # Only learners who actually have an attendance record this week.
-    learners = [st for st in students.values() if (st["attended"] + st["absent"]) > 0]
+    learners = list(students.values())
     for st in learners:
         st["status"] = overall_status(st)
 

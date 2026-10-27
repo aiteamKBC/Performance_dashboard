@@ -7,6 +7,8 @@ computing every metric on demand from the three raw source tables:
   * aptem_auto_extracting  -> learners, OTJH status, evidence docs, engagement
   * progress_review        -> PR (progress review) required/completed by period
   * MCR                    -> MCM required/completed by period
+  * LMS "Learner".learners -> coach assignments + LMS-only learners (see
+                              api/lms_source.py)
 
 The aggregation logic mirrors the original n8n "Code" nodes (see Lateness.js):
 owner grouping, the EXCLUDE list, active-only filtering, @alfanar.com email
@@ -18,6 +20,8 @@ from datetime import date, datetime, timedelta
 import re
 
 from django.db import connection
+
+from .lms_source import get_lms_data
 
 # Owners that are not real coaching case owners (mirrors the n8n EXCLUDE sets).
 EXCLUDE = {
@@ -241,10 +245,173 @@ def _otjh_variance_band(completed, progress_raw, status):
 
 
 # --------------------------------------------------------------------------
+# Owner resolution + review slots (shared by Aptem rows and LMS learners)
+# --------------------------------------------------------------------------
+
+def _owner_resolver(coach_by_email, source=None):
+    """Return ``resolve(row_owner, email) -> (owner, reassigned)`` for Aptem rows.
+
+    The Aptem owner is always kept, so every coach keeps exactly the Aptem
+    learners they had before the LMS was added. The LMS coach is used only for
+    learners Aptem leaves unassigned ("Default Owner" or another excluded /
+    blank owner), who otherwise appear under no coach at all.
+    ``reassigned`` tells callers the row's own owner id / phone are stale.
+
+    ``source`` splits learners: "aptem" keeps only rows under their Aptem owner
+    (identical to the pre-LMS dashboard), "lms" keeps only the rows assigned on
+    the LMS. A dropped row resolves to ("", True), which no coach matches and
+    aggregation skips.
+    """
+    def resolve(row_owner, email):
+        row_owner = _clean(row_owner)
+        coach = coach_by_email.get(_lower(email))
+        if coach and _is_excluded_owner(row_owner) and not _is_excluded_owner(coach):
+            owner, reassigned = coach, True
+        else:
+            owner, reassigned = row_owner, False
+        if (source == "aptem" and reassigned) or (source == "lms" and not reassigned):
+            return "", True
+        return owner, reassigned
+    return resolve
+
+
+def _row_review_slots(row, date_prefix, status_prefix, count):
+    """Parsed review slots of one Aptem PR/MCR row.
+
+    Each slot: {planned, category, shown}. Personal Support Plans and slots
+    with no/unparseable date are skipped.
+    """
+    slots = []
+    for i in range(1, count + 1):
+        planned_raw = row.get("%s%d" % (date_prefix, i))
+        status_raw = row.get("%s%d" % (status_prefix, i))
+        if not _clean(planned_raw):
+            continue
+        if _is_personal_support_plan(planned_raw):
+            continue
+        planned = _parse_review_date(planned_raw)
+        if not planned:
+            continue
+        category = _classify_status(status_raw)
+        slots.append({
+            "planned": planned,
+            "category": category,
+            # Completed reviews reflect their completion date (from the status
+            # cell); everything else reflects the planned date.
+            "shown": _review_display_date(planned, status_raw, category),
+        })
+    return slots
+
+
+def _lms_review_slots(reviews):
+    """LMS review instances -> the same slot shape as _row_review_slots."""
+    slots = []
+    for rv in reviews:
+        category = _classify_status(rv["status_raw"])
+        shown = rv["completed_on"] if category == "Completed" and rv["completed_on"] else rv["planned"]
+        slots.append({"planned": rv["planned"], "category": category, "shown": shown})
+    return slots
+
+
+def _review_learners(table, date_prefix, status_prefix, count, resolve, extras, metric,
+                     has_owner_id=True):
+    """Active learners with their PR (or MCM) review slots.
+
+    Aptem rows from ``table`` (active, non-@alfanar) plus the LMS-only learners.
+    Each item: {owner, owner_id, name, email, slots}.
+    """
+    select_cols = ['"FullName"', '"Email"', '"CaseOwner"', '"Status"']
+    if has_owner_id:  # MCR has no case_owner_id column.
+        select_cols.append("case_owner_id")
+    for i in range(1, count + 1):
+        select_cols.append('"%s%d"' % (date_prefix, i))
+        select_cols.append('"%s%d"' % (status_prefix, i))
+    rows = _fetch_dicts('SELECT %s FROM "%s"' % (", ".join(select_cols), table))
+
+    out = []
+    for r in rows:
+        if _lower(r.get("Status")) != "active":
+            continue
+        if _is_alfanar(r.get("Email")):
+            continue
+        owner, reassigned = resolve(r.get("CaseOwner"), r.get("Email"))
+        out.append({
+            "owner": owner,
+            "owner_id": None if reassigned else r.get("case_owner_id"),
+            "name": _clean(r.get("FullName")) or "Unknown Learner",
+            "email": _clean(r.get("Email")),
+            "slots": _row_review_slots(r, date_prefix, status_prefix, count),
+        })
+    for x in extras:
+        out.append({
+            "owner": x["coach"],
+            "owner_id": None,
+            "name": x["name"],
+            "email": x["email"],
+            "slots": _lms_review_slots(x["reviews"][metric]),
+        })
+    return out
+
+
+def _fmt_hours(value):
+    """Decimal hours -> signed "Xh Ym" (the Aptem Progress-Hours / Target format)."""
+    if value is None:
+        return ""
+    sign = "-" if value < 0 else ""
+    h = int(abs(value))
+    m = round((abs(value) - h) * 60)
+    if m == 60:
+        h, m = h + 1, 0
+    return "%s%dh %dm" % (sign, h, m)
+
+
+def _lms_progress_hours(x):
+    return _fmt_hours(x["progress_hours"]) if x["progress_hours"] is not None else ""
+
+
+# --------------------------------------------------------------------------
 # Per-source aggregation
 # --------------------------------------------------------------------------
 
-def _aggregate_aptem(today):
+def _new_learner_bucket(case_owner_id=None, phone=""):
+    return {
+        "caseOwnerId": case_owner_id,
+        "phone": phone,
+        "totalLearners": 0,
+        "recentSubmitters": 0,
+        "otjhOnTrack": 0,
+        "otjhNeedAttention": 0,
+        "otjhAtRisk": 0,
+        # Variance-based OTJH bands (match the Metric Breakdown / chart).
+        "otjhVarOnTrack": 0,
+        "otjhVarNeedAttention": 0,
+        "otjhVarAtRisk": 0,
+        "evidenceTotal": 0,
+    }
+
+
+def _count_otjh(bucket, status, completed, progress_raw):
+    """Add one learner to the source-status and variance-based OTJH buckets."""
+    band = _otjh_source_band(status)
+    if band == "on_track":
+        bucket["otjhOnTrack"] += 1
+    elif band == "need_attention":
+        bucket["otjhNeedAttention"] += 1
+    elif band == "at_risk":
+        bucket["otjhAtRisk"] += 1
+
+    # Variance-based band (progress-hours vs target) — same logic the
+    # Metric Breakdown table and the coach-page OTJH chart use.
+    var_band = _otjh_variance_band(completed, progress_raw, status)
+    if var_band == "on_track":
+        bucket["otjhVarOnTrack"] += 1
+    elif var_band == "need_attention":
+        bucket["otjhVarNeedAttention"] += 1
+    elif var_band == "at_risk":
+        bucket["otjhVarAtRisk"] += 1
+
+
+def _aggregate_aptem(today, resolve):
     """Total learners, OTJH buckets, and evidence docs per owner (active only)."""
     rows = _fetch_dicts(
         'SELECT "OwnerName", case_owner_id, "OwnerPhone", "Email", '
@@ -260,30 +427,21 @@ def _aggregate_aptem(today):
             continue
         if _is_alfanar(r.get("Email")):
             continue
-        owner = _clean(r.get("OwnerName"))
+        owner, reassigned = resolve(r.get("OwnerName"), r.get("Email"))
         if _is_excluded_owner(owner):
             continue
 
+        # A re-homed row's owner id / phone belong to the old (Aptem) owner.
+        row_id = None if reassigned else r.get("case_owner_id")
+        row_phone = "" if reassigned else _clean(r.get("OwnerPhone"))
+
         bucket = agg.get(owner)
         if bucket is None:
-            bucket = agg[owner] = {
-                "caseOwnerId": r.get("case_owner_id"),
-                "phone": _clean(r.get("OwnerPhone")),
-                "totalLearners": 0,
-                "recentSubmitters": 0,
-                "otjhOnTrack": 0,
-                "otjhNeedAttention": 0,
-                "otjhAtRisk": 0,
-                # Variance-based OTJH bands (match the Metric Breakdown / chart).
-                "otjhVarOnTrack": 0,
-                "otjhVarNeedAttention": 0,
-                "otjhVarAtRisk": 0,
-                "evidenceTotal": 0,
-            }
-        if bucket["caseOwnerId"] in (None, "") and r.get("case_owner_id") not in (None, ""):
-            bucket["caseOwnerId"] = r.get("case_owner_id")
+            bucket = agg[owner] = _new_learner_bucket(row_id, row_phone)
+        if bucket["caseOwnerId"] in (None, "") and row_id not in (None, ""):
+            bucket["caseOwnerId"] = row_id
         if not bucket["phone"]:
-            bucket["phone"] = _clean(r.get("OwnerPhone"))
+            bucket["phone"] = row_phone
 
         bucket["totalLearners"] += 1
 
@@ -291,25 +449,8 @@ def _aggregate_aptem(today):
         if (r.get("Submitted") or 0) and float(r.get("Submitted") or 0) > 0:
             bucket["recentSubmitters"] += 1
 
-        otjh = _lower(r.get("OTJHoursStatus")).replace("-", " ").strip()
-        if otjh in ("ontrack", "on track"):
-            bucket["otjhOnTrack"] += 1
-        elif otjh in ("need attention",):
-            bucket["otjhNeedAttention"] += 1
-        elif otjh in ("at risk", "atrisk"):
-            bucket["otjhAtRisk"] += 1
-
-        # Variance-based band (progress-hours vs target) — same logic the
-        # Metric Breakdown table and the coach-page OTJH chart use.
-        var_band = _otjh_variance_band(
-            float(r.get("Completed") or 0), r.get("Progress-Hours"), r.get("OTJHoursStatus"),
-        )
-        if var_band == "on_track":
-            bucket["otjhVarOnTrack"] += 1
-        elif var_band == "need_attention":
-            bucket["otjhVarNeedAttention"] += 1
-        elif var_band == "at_risk":
-            bucket["otjhVarAtRisk"] += 1
+        _count_otjh(bucket, r.get("OTJHoursStatus"), float(r.get("Completed") or 0),
+                    r.get("Progress-Hours"))
 
         bucket["evidenceTotal"] += (
             (r.get("Assignment Evidence") or 0)
@@ -320,7 +461,110 @@ def _aggregate_aptem(today):
     return agg
 
 
-def _aggregate_marking(today):
+def _coach_conflicts(coach_by_email):
+    """Active Aptem learners whose Aptem coach and LMS coach are two different
+    real coaches. The learner stays counted under the Aptem coach; the conflict
+    is listed under both coaches so it can be fixed in one of the systems.
+
+    Returns {coach: [{name, email, aptem_coach, lms_coach}, ...]}.
+    """
+    rows = _fetch_dicts(
+        'SELECT "FullName", "Email", "OwnerName", "Program-Status" FROM aptem_auto_extracting'
+    )
+    out = {}
+    for r in rows:
+        if _lower(r.get("Program-Status")) != "active" or _is_alfanar(r.get("Email")):
+            continue
+        aptem_coach = _clean(r.get("OwnerName"))
+        lms_coach = coach_by_email.get(_lower(r.get("Email")))
+        if not lms_coach or _is_excluded_owner(aptem_coach) or _is_excluded_owner(lms_coach):
+            continue
+        if lms_coach.lower() == aptem_coach.lower():
+            continue
+        item = {
+            "kind": "coach",
+            "name": _clean(r.get("FullName")) or "Unknown Learner",
+            "email": _clean(r.get("Email")),
+            "aptem_coach": aptem_coach,
+            "lms_coach": lms_coach,
+        }
+        out.setdefault(aptem_coach, []).append(item)
+        out.setdefault(lms_coach, []).append(item)
+    for items in out.values():
+        items.sort(key=lambda x: x["name"])
+    return out
+
+
+def _status_conflicts(aptem_linked_active):
+    """Aptem-linked learners that are Active / Delivery on the LMS but not Active
+    on Aptem (blank extract row, On Break, or missing from the extract). They
+    are not counted, since Aptem's status wins; the conflict is listed under
+    the learner's coach on each system so one of the two can be corrected.
+
+    Returns {coach: [{kind, name, email, aptem_coach, lms_coach,
+    aptem_status, lms_status}, ...]}.
+    """
+    rows = _fetch_dicts(
+        'SELECT "ID", "OwnerName", "Program-Status" FROM aptem_auto_extracting'
+    )
+    aptem = {int(r["ID"]): r for r in rows if r.get("ID") is not None}
+    out = {}
+    for x in aptem_linked_active:
+        if _is_alfanar(x["email"]):
+            continue
+        r = aptem.get(x["aptem_id"])
+        status = _clean(r.get("Program-Status")) if r else ""
+        if status.lower() == "active":
+            continue
+        aptem_coach = _clean(r.get("OwnerName")) if r else ""
+        coaches = {c for c in (aptem_coach, x["coach"]) if not _is_excluded_owner(c)}
+        if not coaches:
+            continue
+        item = {
+            "kind": "status",
+            "name": x["name"],
+            "email": x["email"],
+            "aptem_coach": aptem_coach,
+            "lms_coach": x["coach"],
+            "aptem_status": status or ("Not active" if r else "Not in Aptem"),
+            "lms_status": x["lifecycle"].title(),
+        }
+        for coach in coaches:
+            out.setdefault(coach, []).append(item)
+    for items in out.values():
+        items.sort(key=lambda x: x["name"])
+    return out
+
+
+def _aggregate_lms(today, extras):
+    """Learners, OTJH buckets and engagement per coach for the LMS-only learners.
+
+    Engagement = any learning activity on the LMS in the last 30 days (the LMS
+    counterpart of Require Marking's LastSubDate); the oldest such date also
+    feeds the coach's "last submission" / elapsed days.
+    """
+    agg = {}
+    for x in extras:
+        owner = x["coach"]
+        if _is_excluded_owner(owner):
+            continue
+        bucket = agg.get(owner)
+        if bucket is None:
+            bucket = agg[owner] = {**_new_learner_bucket(), "minDate": None}
+
+        bucket["totalLearners"] += 1
+        _count_otjh(bucket, x["otjh_status"], x["completed"] or 0, _lms_progress_hours(x))
+
+        last = x["last_activity"]
+        if last:
+            if 0 <= (today - last).days <= 29:
+                bucket["recentSubmitters"] += 1
+            if bucket["minDate"] is None or last < bucket["minDate"]:
+                bucket["minDate"] = last
+    return agg
+
+
+def _aggregate_marking(today, resolve):
     """Evidence + marking metrics per owner from the Require Marking table.
 
     Mirrors the n8n //1-evidence node: active-only, exclude @alfanar emails and
@@ -342,15 +586,18 @@ def _aggregate_marking(today):
             continue
         if _is_alfanar(r.get("Email")):
             continue
-        owner = _clean(r.get("CaseOwner"))
+        owner, reassigned = resolve(r.get("CaseOwner"), r.get("Email"))
         if _is_excluded_owner(owner):
             continue
+
+        row_id = None if reassigned else r.get("CaseOwner ID")
+        row_phone = "" if reassigned else _clean(r.get("Phone"))
 
         bucket = agg.get(owner)
         if bucket is None:
             bucket = agg[owner] = {
-                "caseOwnerId": r.get("CaseOwner ID"),
-                "phone": _clean(r.get("Phone")),
+                "caseOwnerId": row_id,
+                "phone": row_phone,
                 "pending": 0,
                 "evidenceAccepted": 0,
                 "evidenceReferred": 0,
@@ -360,10 +607,10 @@ def _aggregate_marking(today):
                 "minDate": None,
                 "days": {k: 0 for k in EVIDENCE_DAY_KEYS},
             }
-        if bucket["caseOwnerId"] in (None, "") and r.get("CaseOwner ID") not in (None, ""):
-            bucket["caseOwnerId"] = r.get("CaseOwner ID")
+        if bucket["caseOwnerId"] in (None, "") and row_id not in (None, ""):
+            bucket["caseOwnerId"] = row_id
         if not bucket["phone"]:
-            bucket["phone"] = _clean(r.get("Phone"))
+            bucket["phone"] = row_phone
 
         bucket["pending"] += (r.get("CountEvidencePending") or 0)
         bucket["evidenceAccepted"] += (r.get("Evidence Accepted") or 0)
@@ -385,29 +632,17 @@ def _aggregate_marking(today):
     return agg
 
 
-def _aggregate_reviews(today, table, date_prefix, status_prefix, count):
+def _aggregate_reviews(today, learners):
     """
-    Generic rolling-period aggregation for the review-style tables
-    (progress_review with Review Planned DateN / Review StatusN, and MCR with
-    MCMN / StatusN). Returns {owner: {periodKey: {required, completed}}}.
+    Rolling-period aggregation of review slots (PR or MCM) for the learners from
+    _review_learners. Returns {owner: {periods, weeks, learner}}.
     """
-    select_cols = ['"CaseOwner"', '"Email"', '"Status"']
-    for i in range(1, count + 1):
-        select_cols.append('"%s%d"' % (date_prefix, i))
-        select_cols.append('"%s%d"' % (status_prefix, i))
-    sql = 'SELECT %s FROM "%s"' % (", ".join(select_cols), table)
-    rows = _fetch_dicts(sql)
-
     ranges = _period_ranges(today)
     wranges = _week_ranges(today)
     agg = {}
 
-    for r in rows:
-        if _lower(r.get("Status")) != "active":
-            continue
-        if _is_alfanar(r.get("Email")):
-            continue
-        owner = _clean(r.get("CaseOwner"))
+    for item in learners:
+        owner = item["owner"]
         if _is_excluded_owner(owner):
             continue
 
@@ -431,19 +666,9 @@ def _aggregate_reviews(today, table, date_prefix, status_prefix, count):
         has_any = {**{key: False for key, _ in PERIODS}, "all": False}
         has_completed = {**{key: False for key, _ in PERIODS}, "all": False}
 
-        for i in range(1, count + 1):
-            planned_raw = r.get("%s%d" % (date_prefix, i))
-            status_raw = r.get("%s%d" % (status_prefix, i))
-            if not _clean(planned_raw):
-                continue
-            if _is_personal_support_plan(planned_raw):
-                continue
-            planned_date = _parse_review_date(planned_raw)
-            if not planned_date:
-                continue
-
-            category = _classify_status(status_raw)
-            is_completed = category == "Completed"
+        for slot in item["slots"]:
+            planned_date = slot["planned"]
+            is_completed = slot["category"] == "Completed"
 
             for key, _days in PERIODS:
                 if not _in_range(planned_date, ranges[key]):
@@ -477,25 +702,53 @@ def _aggregate_reviews(today, table, date_prefix, status_prefix, count):
     return agg
 
 
+def _pr_learners(resolve, extras):
+    return _review_learners("progress_review", "Review Planned Date", "Review Status", 16,
+                            resolve, extras, "PR")
+
+
+def _mcm_learners(resolve, extras):
+    return _review_learners("MCR", "MCM", "Status", 22, resolve, extras, "MCM",
+                            has_owner_id=False)
+
+
 # --------------------------------------------------------------------------
 # Public entry point
 # --------------------------------------------------------------------------
 
-def compute_coaches_lateness():
-    """Build the list of per-coach records consumed by the Lateness page."""
+# ``source`` values accepted by compute_coaches_lateness.
+SOURCES = ("aptem", "lms")
+
+
+def compute_coaches_lateness(source=None):
+    """Build the list of per-coach records consumed by the Lateness page.
+
+    ``source`` splits learners by who assigned them to the coach: "aptem" =
+    assigned on Aptem (matches Aptem's own screens), "lms" = LMS-only learners
+    plus Aptem learners re-assigned on the LMS. None (default) = both — the two
+    splits add up to it.
+    """
     today = _today()
     empty_period = {"required": 0, "completed": 0}
 
-    aptem = _aggregate_aptem(today)
-    marking = _aggregate_marking(today)
-    pr = _aggregate_reviews(today, "progress_review", "Review Planned Date", "Review Status", 16)
-    mcm = _aggregate_reviews(today, "MCR", "MCM", "Status", 22)
+    lms_data = get_lms_data()
+    resolve = _owner_resolver(lms_data["coach_by_email"], source)
+    extras = [] if source == "aptem" else lms_data["extras"]
 
-    owners = set(aptem) | set(marking) | set(pr) | set(mcm)
+    aptem = _aggregate_aptem(today, resolve)
+    lms = _aggregate_lms(today, extras)
+    marking = _aggregate_marking(today, resolve)
+    pr = _aggregate_reviews(today, _pr_learners(resolve, extras))
+    mcm = _aggregate_reviews(today, _mcm_learners(resolve, extras))
+    conflicts = _coach_conflicts(lms_data["coach_by_email"])
+    status_conflicts = _status_conflicts(lms_data["aptem_linked_active"])
+
+    owners = set(aptem) | set(lms) | set(marking) | set(pr) | set(mcm)
 
     records = []
     for idx, owner in enumerate(sorted(owners), start=1):
         a = aptem.get(owner, {})
+        x = lms.get(owner, {})
         mk = marking.get(owner, {})
         p = pr.get(owner, {})
         m = mcm.get(owner, {})
@@ -504,17 +757,19 @@ def compute_coaches_lateness():
         p_weeks = p.get("weeks", {})
         m_periods = m.get("periods", {})
 
-        total_learners = a.get("totalLearners", 0)
+        total_learners = a.get("totalLearners", 0) + x.get("totalLearners", 0)
         # Recent submitters: prefer the marking source (LastSubDate within 30d),
-        # falling back to the aptem engagement proxy.
-        recent = mk.get("recentSubmitters", a.get("recentSubmitters", 0))
+        # falling back to the aptem engagement proxy; plus LMS-only learners
+        # active on the LMS in the last 30 days.
+        recent = mk.get("recentSubmitters", a.get("recentSubmitters", 0)) + x.get("recentSubmitters", 0)
         engagement = round((recent / total_learners) * 100) if total_learners else 0
 
         pending = mk.get("pending", 0)
         days = mk.get("days", {})
         week_total = sum(days.get(k, 0) for k in EVIDENCE_DAY_KEYS)
 
-        min_date = mk.get("minDate")
+        min_dates = [d for d in (mk.get("minDate"), x.get("minDate")) if d]
+        min_date = min(min_dates) if min_dates else None
         last_sub = min_date.isoformat() if min_date else ""
         elapsed = (today - min_date).days if min_date else 0
 
@@ -553,6 +808,9 @@ def compute_coaches_lateness():
         case_owner_id = a.get("caseOwnerId") or mk.get("caseOwnerId")
         phone = a.get("phone") or mk.get("phone") or ""
 
+        def otjh(key):
+            return a.get(key, 0) + x.get(key, 0)
+
         records.append({
             "id": idx,
             "caseowner": owner,
@@ -562,16 +820,17 @@ def compute_coaches_lateness():
             "elapseddays": elapsed,
 
             "total_learners": total_learners,
+            "lms_learners": x.get("totalLearners", 0),
             "recent_submitters": recent,
             "learner_engagement": engagement,
 
-            "otjh_ontrack_0_field": a.get("otjhOnTrack", 0),
-            "otjh_need_attention_20_40_field": a.get("otjhNeedAttention", 0),
-            "otjh_at_risk_40_field": a.get("otjhAtRisk", 0),
+            "otjh_ontrack_0_field": otjh("otjhOnTrack"),
+            "otjh_need_attention_20_40_field": otjh("otjhNeedAttention"),
+            "otjh_at_risk_40_field": otjh("otjhAtRisk"),
             # Variance-based OTJH counts (match the Metric Breakdown / chart bands).
-            "otjh_var_ontrack": a.get("otjhVarOnTrack", 0),
-            "otjh_var_need_attention": a.get("otjhVarNeedAttention", 0),
-            "otjh_var_at_risk": a.get("otjhVarAtRisk", 0),
+            "otjh_var_ontrack": otjh("otjhVarOnTrack"),
+            "otjh_var_need_attention": otjh("otjhVarNeedAttention"),
+            "otjh_var_at_risk": otjh("otjhVarAtRisk"),
 
             # Pending & marking (from Require Marking)
             "pending": pending,
@@ -628,6 +887,10 @@ def compute_coaches_lateness():
             # home-page PR & MCM performance charts' time-period filter.
             "pr_bylearner": pr_bylearner,
             "mcm_bylearner": mcm_bylearner,
+
+            # Learners whose Aptem and LMS coaches disagree (see _coach_conflicts)
+            # or who are Active on the LMS but not on Aptem (_status_conflicts).
+            "coach_conflicts": conflicts.get(owner, []) + status_conflicts.get(owner, []),
         })
 
     return records
@@ -659,17 +922,25 @@ def _owner_matches(row_owner, row_owner_id, target_name, target_id):
     return False
 
 
-def compute_coach_drill(coach_name=None, case_owner_id=None):
+def compute_coach_drill(coach_name=None, case_owner_id=None, source=None):
     """
     For a single coach, return the learner-level lists that make up each
     counted metric on the Lateness page. Used by the drill-down drawer.
+
+    ``source`` ("aptem" / "lms" / None = both) narrows the learners exactly as
+    in compute_coaches_lateness.
     """
     today = _today()
     ranges = _period_ranges(today)
-    wranges = _week_ranges(today)
 
     name = _clean(coach_name)
     cid = case_owner_id
+
+    lms_data = get_lms_data()
+    resolve = _owner_resolver(lms_data["coach_by_email"], source)
+    extras = [] if source == "aptem" else [
+        x for x in lms_data["extras"] if _owner_matches(x["coach"], None, name, cid)
+    ]
 
     # ---- aptem_auto_extracting: learners, OTJH buckets -------------------
     aptem_rows = _fetch_dicts(
@@ -680,26 +951,35 @@ def compute_coach_drill(coach_name=None, case_owner_id=None):
     learners = []
     otjh_at_risk, otjh_need_attention, otjh_on_track = [], [], []
     engaged = []
+
+    def add_learner(full, email, otjh_status, has_submitted):
+        learners.append({"name": full, "email": email})
+        band = _otjh_source_band(otjh_status)
+        if band == "at_risk":
+            otjh_at_risk.append({"name": full, "detail": "At Risk"})
+        elif band == "need_attention":
+            otjh_need_attention.append({"name": full, "detail": "Need Attention"})
+        elif band == "on_track":
+            otjh_on_track.append({"name": full, "detail": "On Track"})
+        if has_submitted:
+            engaged.append({"name": full})
+
     for r in aptem_rows:
         if _lower(r.get("Program-Status")) != "active":
             continue
         if _is_alfanar(r.get("Email")):
             continue
-        if not _owner_matches(r.get("OwnerName"), r.get("case_owner_id"), name, cid):
+        owner, reassigned = resolve(r.get("OwnerName"), r.get("Email"))
+        if not _owner_matches(owner, None if reassigned else r.get("case_owner_id"), name, cid):
             continue
-        full = _clean(r.get("FullName")) or "Unknown Learner"
-        learners.append({"name": full, "email": _clean(r.get("Email"))})
-
-        otjh = _lower(r.get("OTJHoursStatus")).replace("-", " ").strip()
-        if otjh in ("at risk", "atrisk"):
-            otjh_at_risk.append({"name": full, "detail": "At Risk"})
-        elif otjh == "need attention":
-            otjh_need_attention.append({"name": full, "detail": "Need Attention"})
-        elif otjh in ("ontrack", "on track"):
-            otjh_on_track.append({"name": full, "detail": "On Track"})
-
-        if (r.get("Submitted") or 0) and float(r.get("Submitted") or 0) > 0:
-            engaged.append({"name": full})
+        add_learner(
+            _clean(r.get("FullName")) or "Unknown Learner",
+            _clean(r.get("Email")),
+            r.get("OTJHoursStatus"),
+            bool(r.get("Submitted")) and float(r.get("Submitted") or 0) > 0,
+        )
+    for x in extras:
+        add_learner(x["name"], x["email"], x["otjh_status"], x["last_activity"] is not None)
 
     # ---- Require Marking: pending evidence, referred closure ------------
     day_cols = ", ".join('"%s"' % k for k in EVIDENCE_DAY_KEYS)
@@ -714,7 +994,8 @@ def compute_coach_drill(coach_name=None, case_owner_id=None):
             continue
         if _is_alfanar(r.get("Email")):
             continue
-        if not _owner_matches(r.get("CaseOwner"), r.get("CaseOwner ID"), name, cid):
+        owner, reassigned = resolve(r.get("CaseOwner"), r.get("Email"))
+        if not _owner_matches(owner, None if reassigned else r.get("CaseOwner ID"), name, cid):
             continue
         full = _clean(r.get("FullName")) or "Unknown Learner"
 
@@ -728,22 +1009,29 @@ def compute_coach_drill(coach_name=None, case_owner_id=None):
         last_sub = _parse_iso_date(r.get("LastSubDate"))
         if last_sub and 0 <= (today - last_sub).days <= 29:
             recent_submitters.append({"name": full, "detail": last_sub.isoformat()})
+    for x in extras:
+        last = x["last_activity"]
+        if last and 0 <= (today - last).days <= 29:
+            recent_submitters.append({"name": x["name"], "detail": last.isoformat()})
 
-    # ---- progress_review: PR completed / outstanding this period --------
-    pr_completed_4w, pr_outstanding_12w, pr_completed_12w = _review_drill(
-        "progress_review", "Review Planned Date", "Review Status", 16,
-        name, cid, ranges, today
-    )
-
-    # ---- MCR: MCM completed / outstanding this period -------------------
-    mcm_completed_4w, mcm_outstanding_12w, mcm_completed_12w = _review_drill(
-        "MCR", "MCM", "Status", 22, name, cid, ranges, today, mcm=True
-    )
+    # ---- progress_review / MCR (+ LMS reviews): PR / MCM per learner ----
+    pr_learners = [
+        i for i in _pr_learners(resolve, extras)
+        if _owner_matches(i["owner"], i["owner_id"], name, cid)
+    ]
+    mcm_learners = [
+        i for i in _mcm_learners(resolve, extras)
+        if _owner_matches(i["owner"], i["owner_id"], name, cid)
+    ]
+    pr_completed_4w, pr_outstanding_12w, pr_completed_12w = _review_drill(pr_learners, ranges)
+    mcm_completed_4w, mcm_outstanding_12w, mcm_completed_12w = _review_drill(mcm_learners, ranges)
 
     def section(key, label, items):
         return {"key": key, "label": label, "count": len(items), "learners": items}
 
-    per_learner = _compute_coach_learner_table(name, cid, today)
+    per_learner = _compute_coach_learner_table(
+        name, cid, resolve, extras, pr_learners, mcm_learners,
+    )
 
     # Programme lookup (email -> programme, name -> programme) to enrich the
     # per-review rows, since the review tables don't carry programme.
@@ -759,12 +1047,7 @@ def compute_coach_drill(coach_name=None, case_owner_id=None):
     # One row per PR/MCM review slot (so the filterable Metric Breakdown table
     # can show Completed/Scheduled/etc. per individual review, not just the
     # learner's latest one).
-    review_rows = (
-        _review_rows("progress_review", "Review Planned Date", "Review Status", 16,
-                     name, cid, today, "PR", _programme)
-        + _review_rows("MCR", "MCM", "Status", 22,
-                       name, cid, today, "MCM", _programme, mcm=True)
-    )
+    review_rows = _review_rows(pr_learners, "PR", _programme) + _review_rows(mcm_learners, "MCM", _programme)
 
     return {
         "coach": name,
@@ -790,28 +1073,19 @@ def compute_coach_drill(coach_name=None, case_owner_id=None):
     }
 
 
-def _latest_review_status(row, date_prefix, status_prefix, count):
-    """Most recent planned review's status category + date for a learner row."""
-    best_date, best_status = None, ""
-    for i in range(1, count + 1):
-        planned_raw = row.get("%s%d" % (date_prefix, i))
-        if not _clean(planned_raw):
-            continue
-        if _is_personal_support_plan(planned_raw):
-            continue
-        planned = _parse_review_date(planned_raw)
-        if not planned:
-            continue
-        if best_date is None or planned > best_date:
-            best_date = planned
-            best_status = _classify_status(row.get("%s%d" % (status_prefix, i)))
-    return (best_date.isoformat() if best_date else ""), best_status
+def _latest_review_status(slots):
+    """Most recent planned review's status category + date for a learner."""
+    best = max(slots, key=lambda s: s["planned"], default=None)
+    if best is None:
+        return "", ""
+    return best["planned"].isoformat(), best["category"]
 
 
-def _compute_coach_learner_table(name, cid, today):
+def _compute_coach_learner_table(name, cid, resolve, extras, pr_learners, mcm_learners):
     """
     One row per active learner of the coach, joining metrics across all four
-    source tables (keyed by learner email, falling back to name).
+    Aptem source tables plus the LMS-only learners (keyed by learner email,
+    falling back to name).
     """
     def key_of(email, full):
         e = _lower(email)
@@ -831,7 +1105,8 @@ def _compute_coach_learner_table(name, cid, today):
             continue
         if _is_alfanar(r.get("Email")):
             continue
-        if not _owner_matches(r.get("OwnerName"), r.get("case_owner_id"), name, cid):
+        owner, reassigned = resolve(r.get("OwnerName"), r.get("Email"))
+        if not _owner_matches(owner, None if reassigned else r.get("case_owner_id"), name, cid):
             continue
         full = _clean(r.get("FullName")) or "Unknown Learner"
         k = key_of(r.get("Email"), full)
@@ -839,6 +1114,7 @@ def _compute_coach_learner_table(name, cid, today):
             "name": full,
             "email": _clean(r.get("Email")),
             "programme": _clean(r.get("Program Name")),
+            "source": "Aptem",
             "otjh_status": _clean(r.get("OTJHoursStatus")),
             "submitted": float(r.get("Submitted") or 0),
             "completed": float(r.get("Completed") or 0),
@@ -859,6 +1135,34 @@ def _compute_coach_learner_table(name, cid, today):
             "mcm_date": "",
         }
 
+    # LMS-only learners (already filtered to this coach). Hours are formatted
+    # like the Aptem text columns so the table / OTJH chart parse them the same.
+    for x in extras:
+        k = key_of(x["email"], x["name"])
+        pv = x["progress_variance"]
+        rows[k] = {
+            "name": x["name"],
+            "email": x["email"],
+            "programme": x["programme"],
+            "source": "LMS",
+            "otjh_status": x["otjh_status"],
+            "submitted": x["completed"] or 0,
+            "completed": x["completed"] or 0,
+            "planned": x["planned"] or 0,
+            "minimum": x["minimum"] or 0,
+            "otjh_target": _fmt_hours(x["target"]),
+            "otjh_progress_hours": _lms_progress_hours(x),
+            "otjh_progress_variance": ("%.1f%%" % (pv * 100)) if pv is not None else "",
+            "pending": 0,
+            "referred_closure": 0,
+            "total_evidence": 0,
+            "last_sub": x["last_activity"].isoformat() if x["last_activity"] else "",
+            "pr_status": "",
+            "pr_date": "",
+            "mcm_status": "",
+            "mcm_date": "",
+        }
+
     # Require Marking: evidence + last submission
     day = ", ".join('"%s"' % k for k in EVIDENCE_DAY_KEYS)
     marking = _fetch_dicts(
@@ -871,7 +1175,8 @@ def _compute_coach_learner_table(name, cid, today):
             continue
         if _is_alfanar(r.get("Email")):
             continue
-        if not _owner_matches(r.get("CaseOwner"), r.get("CaseOwner ID"), name, cid):
+        owner, reassigned = resolve(r.get("CaseOwner"), r.get("Email"))
+        if not _owner_matches(owner, None if reassigned else r.get("CaseOwner ID"), name, cid):
             continue
         full = _clean(r.get("FullName")) or "Unknown Learner"
         k = key_of(r.get("Email"), full)
@@ -884,50 +1189,21 @@ def _compute_coach_learner_table(name, cid, today):
         last = _parse_iso_date(r.get("LastSubDate"))
         row["last_sub"] = last.isoformat() if last else ""
 
-    # progress_review: latest PR status
-    pr = _fetch_dicts(
-        'SELECT "FullName", "Email", "CaseOwner", case_owner_id, "Status", '
-        + ", ".join('"Review Planned Date%d", "Review Status%d"' % (i, i) for i in range(1, 17))
-        + ' FROM progress_review'
-    )
-    for r in pr:
-        if _lower(r.get("Status")) != "active":
-            continue
-        if _is_alfanar(r.get("Email")):
-            continue
-        if not _owner_matches(r.get("CaseOwner"), r.get("case_owner_id"), name, cid):
-            continue
-        k = key_of(r.get("Email"), _clean(r.get("FullName")))
-        row = rows.get(k)
-        if row is None:
-            continue
-        d, s = _latest_review_status(r, "Review Planned Date", "Review Status", 16)
-        row["pr_date"], row["pr_status"] = d, s
-
-    # MCR: latest MCM status (no case_owner_id column; match on name)
-    mcr = _fetch_dicts(
-        'SELECT "FullName", "Email", "CaseOwner", "Status", '
-        + ", ".join('"MCM%d", "Status%d"' % (i, i) for i in range(1, 23))
-        + ' FROM "MCR"'
-    )
-    for r in mcr:
-        if _lower(r.get("Status")) != "active":
-            continue
-        if _is_alfanar(r.get("Email")):
-            continue
-        if not _owner_matches(r.get("CaseOwner"), None, name, cid):
-            continue
-        k = key_of(r.get("Email"), _clean(r.get("FullName")))
-        row = rows.get(k)
-        if row is None:
-            continue
-        d, s = _latest_review_status(r, "MCM", "Status", 22)
-        row["mcm_date"], row["mcm_status"] = d, s
+    # Latest PR / MCM status (Aptem progress_review / MCR, LMS reviews).
+    for items, date_key, status_key in (
+        (pr_learners, "pr_date", "pr_status"),
+        (mcm_learners, "mcm_date", "mcm_status"),
+    ):
+        for item in items:
+            row = rows.get(key_of(item["email"], item["name"]))
+            if row is None:
+                continue
+            row[date_key], row[status_key] = _latest_review_status(item["slots"])
 
     return sorted(rows.values(), key=lambda x: x["name"])
 
 
-def _review_drill(table, date_prefix, status_prefix, count, name, cid, ranges, today, mcm=False):
+def _review_drill(learners, ranges):
     """Return (completed_4w, outstanding_12w, completed_12w) learner lists.
 
     ``outstanding_12w`` is reviews planned in the 12-week window that are NOT
@@ -936,42 +1212,17 @@ def _review_drill(table, date_prefix, status_prefix, count, name, cid, ranges, t
     longer shows up under "Required". (outstanding_12w + completed_12w together
     equal the total planned in the window, which is the KPI "required" count.)
     """
-    select_cols = ['"FullName"', '"Email"', '"CaseOwner"', 'case_owner_id', '"Status"']
-    for i in range(1, count + 1):
-        select_cols.append('"%s%d"' % (date_prefix, i))
-        select_cols.append('"%s%d"' % (status_prefix, i))
-    # MCR has no case_owner_id column; fall back to name-only match there.
-    if mcm:
-        select_cols = [c for c in select_cols if c != "case_owner_id"]
-    sql = 'SELECT %s FROM "%s"' % (", ".join(select_cols), table)
-    rows = _fetch_dicts(sql)
-
     # No dedup: count each qualifying review slot, exactly as the row
     # aggregation does, so the drill totals match the numbers on the table.
     completed_4w, outstanding_window, completed_12w = [], [], []
     win_4w = ranges["4w"]
     win_long = ranges["12w"]
 
-    for r in rows:
-        if _lower(r.get("Status")) != "active":
-            continue
-        if _is_alfanar(r.get("Email")):
-            continue
-        if not _owner_matches(r.get("CaseOwner"), r.get("case_owner_id"), name, cid):
-            continue
-        full = _clean(r.get("FullName")) or "Unknown Learner"
-
-        for i in range(1, count + 1):
-            planned_raw = r.get("%s%d" % (date_prefix, i))
-            status_raw = r.get("%s%d" % (status_prefix, i))
-            if not _clean(planned_raw):
-                continue
-            if _is_personal_support_plan(planned_raw):
-                continue
-            planned = _parse_review_date(planned_raw)
-            if not planned:
-                continue
-            category = _classify_status(status_raw)
+    for item in learners:
+        full = item["name"]
+        for slot in item["slots"]:
+            planned = slot["planned"]
+            category = slot["category"]
             is_done = category == "Completed"
             iso = planned.isoformat()
 
@@ -990,58 +1241,24 @@ def _review_drill(table, date_prefix, status_prefix, count, name, cid, ranges, t
     return completed_4w, outstanding_window, completed_12w
 
 
-def _review_rows(table, date_prefix, status_prefix, count, name, cid, today,
-                 metric, programme_fn, mcm=False):
+def _review_rows(learners, metric, programme_fn):
     """
     One row per individual PR/MCM review slot for the coach's active learners.
 
-    Each row: {name, email, programme, metric, status, date}. Personal Support
-    Plans and slots with no/unparseable date are skipped. ``status`` is the
+    Each row: {name, email, programme, metric, status, date}. ``status`` is the
     classified category (Completed / Scheduled / Awaiting Signature /
     Not Scheduled / In Progress).
     """
-    select_cols = ['"FullName"', '"Email"', '"CaseOwner"', 'case_owner_id', '"Status"']
-    for i in range(1, count + 1):
-        select_cols.append('"%s%d"' % (date_prefix, i))
-        select_cols.append('"%s%d"' % (status_prefix, i))
-    if mcm:  # MCR has no case_owner_id column.
-        select_cols = [c for c in select_cols if c != "case_owner_id"]
-    sql = 'SELECT %s FROM "%s"' % (", ".join(select_cols), table)
-    rows = _fetch_dicts(sql)
-
     out = []
-    for r in rows:
-        if _lower(r.get("Status")) != "active":
-            continue
-        if _is_alfanar(r.get("Email")):
-            continue
-        if not _owner_matches(r.get("CaseOwner"), r.get("case_owner_id"), name, cid):
-            continue
-        full = _clean(r.get("FullName")) or "Unknown Learner"
-        email = _clean(r.get("Email"))
-
-        for i in range(1, count + 1):
-            planned_raw = r.get("%s%d" % (date_prefix, i))
-            status_raw = r.get("%s%d" % (status_prefix, i))
-            if not _clean(planned_raw):
-                continue
-            if _is_personal_support_plan(planned_raw):
-                continue
-            planned = _parse_review_date(planned_raw)
-            if not planned:
-                continue
-            category = _classify_status(status_raw)
-            # Completed reviews reflect their completion date (from the status
-            # cell); everything else reflects the planned date.
-            shown = _review_display_date(planned, status_raw, category)
+    for item in learners:
+        for slot in item["slots"]:
             out.append({
-                "name": full,
-                "email": email,
-                "programme": programme_fn(email, full),
+                "name": item["name"],
+                "email": item["email"],
+                "programme": programme_fn(item["email"], item["name"]),
                 "metric": metric,
-                "status": category,
-                "date": shown.isoformat(),
+                "status": slot["category"],
+                "date": slot["shown"].isoformat(),
             })
-
     out.sort(key=lambda x: (x["name"], x["date"]))
     return out

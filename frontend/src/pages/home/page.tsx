@@ -1,7 +1,9 @@
 import { useMemo, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import type { CoachRecord } from "@/mocks/dashboard";
-import { fetchCoachesLateness } from "@/services/coachesLateness";
+import { fetchCoachesLateness, type LearnerSource } from "@/services/coachesLateness";
+import SourcePickerModal from "./components/SourcePickerModal";
+import ActiveLearnersNote from "./components/ActiveLearnersNote";
 import { TopbarLeft, TopbarRight } from "./components/DashboardHeader";
 import ChartsSection from "./components/ChartsSection";
 import CoachCards from "./components/CoachCards";
@@ -11,7 +13,12 @@ export default function Home() {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCoach, setActiveCoach] = useState("All");
+  // Combined records drive the cards and charts; the per-source records only
+  // supply the learner counts shown in the APTEM / LMS picker.
   const [coachRecords, setCoachRecords] = useState<CoachRecord[]>([]);
+  const [aptemRecords, setAptemRecords] = useState<CoachRecord[]>([]);
+  const [lmsRecords, setLmsRecords] = useState<CoachRecord[]>([]);
+  const [pickerFor, setPickerFor] = useState<CoachRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -20,8 +27,14 @@ export default function Home() {
       try {
         setLoading(true);
         setError(null);
-        const data = await fetchCoachesLateness();
-        setCoachRecords(data);
+        const [all, aptem, lms] = await Promise.all([
+          fetchCoachesLateness(),
+          fetchCoachesLateness("aptem"),
+          fetchCoachesLateness("lms"),
+        ]);
+        setCoachRecords(all);
+        setAptemRecords(aptem);
+        setLmsRecords(lms);
       } catch (err) {
         console.error('Failed to load coaches lateness data:', err);
         setError('Failed to load data from API.');
@@ -49,6 +62,14 @@ export default function Home() {
       return matchesCoach && matchesSearch;
     });
   }, [searchQuery, activeCoach, coachRecords]);
+
+  const learnersIn = (rows: CoachRecord[], coach: string) =>
+    rows.find((r) => r.coach === coach)?.totalLearners ?? 0;
+
+  const openCoach = (r: CoachRecord, source: LearnerSource) => {
+    setPickerFor(null);
+    navigate(`/coach/${r.id}?source=${source}`);
+  };
 
   const getLatestSnapshotDate = (rows: CoachRecord[]) => {
     const normalizedDates = rows
@@ -128,13 +149,27 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Coach cards — click to open the coach detail page */}
-          <CoachCards records={filtered} onSelect={(r) => navigate(`/coach/${r.id}`)} />
+          <ActiveLearnersNote />
+
+          {/* Coach cards (all learners) — click to choose APTEM or LMS learners */}
+          <CoachCards records={filtered} onSelect={setPickerFor} />
 
           {/* Chart row */}
           <ChartsSection records={filtered} />
         </div>
       </AppShell>
+
+      {pickerFor && (
+        <SourcePickerModal
+          coachName={pickerFor.coach}
+          counts={{
+            aptem: learnersIn(aptemRecords, pickerFor.coach),
+            lms: learnersIn(lmsRecords, pickerFor.coach),
+          }}
+          onPick={(source) => openCoach(pickerFor, source)}
+          onClose={() => setPickerFor(null)}
+        />
+      )}
 
       <style>{`
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }

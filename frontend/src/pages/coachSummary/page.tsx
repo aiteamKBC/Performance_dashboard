@@ -77,9 +77,19 @@ export default function CoachSummaryPage() {
     .sort((a, b) => b.last10WeeksAbsenceRatio - a.last10WeeksAbsenceRatio);
   const highRisk = highRiskCoaches.length;
   const totalStudents = overall?.studentsCount ?? coaches.reduce((s, c) => s + c.studentsCount, 0);
-  const avgAbsence = coaches.length > 0
-    ? (coaches.reduce((s, c) => s + c.last10WeeksAbsenceRatio, 0) / coaches.length).toFixed(1)
-    : "0.0";
+  // Company-wide pooled ratio over the window (the Overall Company row), not a
+  // mean of coach ratios — coaches with no attendance records would drag that to 0.
+  const avgAbsence = (overall?.last10WeeksAbsenceRatio ?? 0).toFixed(1);
+
+  // Range of the weeks currently on screen (weeks are newest first).
+  const shownWeeks = (overall ?? coaches[0])?.weeks ?? [];
+  const newestWeek = shownWeeks[0];
+  const oldestWeek = shownWeeks[shownWeeks.length - 1];
+  const fmtDay = (iso?: string) =>
+    iso ? new Date(`${iso}T00:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : "";
+  const weeksRange = newestWeek && oldestWeek
+    ? `${oldestWeek.label} – ${newestWeek.label} · ${fmtDay(oldestWeek.weekStart)} – ${fmtDay(newestWeek.weekEnd)}`
+    : "";
 
   const handleWeekSelect = (coachName: string, weekIndex: number) => {
     const record = records.find((r) => r.coachName === coachName);
@@ -134,17 +144,29 @@ export default function CoachSummaryPage() {
             Coach Summary
           </h1>
         }
-        topbarRight={
-          <span style={{ fontSize: "var(--text-sm)", color: "var(--color-text-secondary)" }}>
-            10-week absence tracking
-          </span>
-        }
       >
         <div className="page-layout">
           {/* Page heading */}
           <div className="page-heading-row">
             <div>
               <h2 style={{ margin: 0 }}>Absence Ratio Overview</h2>
+              {weeksRange && (
+                <p style={{
+                  margin: "var(--space-2) 0 0", display: "flex", alignItems: "center", flexWrap: "wrap",
+                  gap: "var(--space-2)", fontSize: "var(--text-sm)", color: "var(--color-text-secondary)",
+                }}>
+                  <span style={{
+                    display: "inline-flex", alignItems: "center", gap: 6,
+                    background: "var(--color-accent-tint)", color: "var(--color-accent)",
+                    padding: "2px 10px", borderRadius: 999, fontWeight: "var(--font-semibold)",
+                  }}>
+                    <i className="ri-calendar-line" aria-hidden="true" />
+                    {hasNewer ? `${shownWeeks.length} weeks` : `Last ${shownWeeks.length} weeks`}
+                  </span>
+                  <span className="tabular-nums">{weeksRange}</span>
+                  <span style={{ color: "var(--color-text-muted)" }}>· all figures on this page cover these weeks</span>
+                </p>
+              )}
             </div>
           </div>
 

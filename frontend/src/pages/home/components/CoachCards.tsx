@@ -1,8 +1,12 @@
-import type { CoachRecord } from "@/mocks/dashboard";
+import { useState } from "react";
+import { conflictsLabel, type CoachRecord } from "@/mocks/dashboard";
+import CoachConflictsModal from "./CoachConflictsModal";
 
 interface CoachCardsProps {
   records: CoachRecord[];
   onSelect: (record: CoachRecord) => void;
+  /** Section divider label (default "Coaches"). */
+  title?: string;
 }
 
 function initials(name: string) {
@@ -29,14 +33,17 @@ function Stat({ label, value, color }: { label: string; value: string | number; 
   );
 }
 
-export default function CoachCards({ records, onSelect }: CoachCardsProps) {
+export default function CoachCards({ records, onSelect, title = "Coaches" }: CoachCardsProps) {
+  // Coach whose conflicts popup is open (opened from the card's badge).
+  const [conflictsFor, setConflictsFor] = useState<CoachRecord | null>(null);
+
   if (records.length === 0) return null;
 
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", marginBottom: "var(--space-3)" }}>
         <div style={{ height: 1, flex: 1, background: "var(--color-border)" }} />
-        <span style={{ fontSize: "var(--text-xs)", textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)", padding: "0 var(--space-2)" }}>Coaches</span>
+        <span style={{ fontSize: "var(--text-xs)", textTransform: "uppercase", letterSpacing: "0.06em", color: "var(--color-text-muted)", padding: "0 var(--space-2)" }}>{title}</span>
         <div style={{ height: 1, flex: 1, background: "var(--color-border)" }} />
       </div>
 
@@ -89,14 +96,32 @@ export default function CoachCards({ records, onSelect }: CoachCardsProps) {
                 </div>
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <p style={{ margin: 0, fontSize: "var(--text-sm)", fontWeight: "var(--font-semibold)", color: "var(--color-text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.coach}</p>
-                  <p style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>{r.totalLearners} learners</p>
+                  <p style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>{r.totalLearners} active learners</p>
+                  {(r.coachConflicts?.length ?? 0) > 0 && (
+                    <span
+                      // A span, not a button: the whole card is already a button.
+                      onClick={(e) => { e.stopPropagation(); setConflictsFor(r); }}
+                      title="Click to see the learners with a different coach or status on Aptem and on the LMS"
+                      style={{
+                        cursor: "pointer",
+                        display: "inline-flex", alignItems: "center", gap: 4, marginTop: 4,
+                        fontSize: 10, fontWeight: "var(--font-semibold)",
+                        color: "var(--color-warning)", background: "var(--color-warning-bg)",
+                        border: "1px solid var(--color-warning-border)",
+                        borderRadius: 999, padding: "1px 8px",
+                      }}
+                    >
+                      <i className="ri-error-warning-line" aria-hidden="true" />
+                      {conflictsLabel(r.coachConflicts!)}
+                    </span>
+                  )}
                 </div>
                 <i className="ri-arrow-right-line" style={{ color: "var(--color-text-muted)" }} aria-hidden="true" />
               </div>
 
               {/* Metrics grid */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "var(--space-2) var(--space-3)" }}>
-                <Stat label="Learners" value={r.totalLearners} />
+                <Stat label="Active Learners" value={r.totalLearners} />
                 <Stat label="Engagement" value={`${r.learnerEngagement}%`} color={tone(r.learnerEngagement, 85, 70)} />
                 <Stat label="PR Rate" value={`${prRate}%`} color={tone(prRate, 90, 70)} />
                 <Stat label="OTJH Risk" value={otjhAtRisk} color={tone(otjhAtRisk, 4, 7, true)} />
@@ -125,6 +150,14 @@ export default function CoachCards({ records, onSelect }: CoachCardsProps) {
           );
         })}
       </div>
+
+      {conflictsFor && (
+        <CoachConflictsModal
+          coachName={conflictsFor.coach}
+          conflicts={conflictsFor.coachConflicts ?? []}
+          onClose={() => setConflictsFor(null)}
+        />
+      )}
     </div>
   );
 }

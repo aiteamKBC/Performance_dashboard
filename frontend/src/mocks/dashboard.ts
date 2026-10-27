@@ -1,6 +1,26 @@
 export type ReviewPeriodKey = "4w" | "8w" | "12w" | "all";
 export type PeriodCounts = Record<ReviewPeriodKey, { required: number; completed: number }>;
 
+export interface CoachConflict {
+  // "coach": different coach on Aptem and the LMS (counted under Aptem's).
+  // "status": Active on the LMS but not on Aptem (not counted).
+  kind?: "coach" | "status";
+  name: string;
+  email: string;
+  aptem_coach: string;
+  lms_coach: string;
+  aptem_status?: string;
+  lms_status?: string;
+}
+
+// Badge / heading label for a coach's conflicts, by the kinds present.
+export function conflictsLabel(conflicts: CoachConflict[]): string {
+  const n = conflicts.length;
+  const kinds = new Set(conflicts.map((c) => c.kind ?? "coach"));
+  const kind = kinds.size > 1 ? "data" : kinds.has("status") ? "status" : "coach";
+  return `${n} ${kind} conflict${n > 1 ? "s" : ""}`;
+}
+
 export interface CoachRecord {
   id: number;
   associate: string;
@@ -66,7 +86,8 @@ export interface CoachRecord {
   mcmCompleted12Weeks?: number;
   mcmCompletionRate12Weeks?: number;
   mcmBehind12Weeks?: number;
-  // Per-learner required/completed per window (4w/8w/12w/all) for the home-page
+  // Learners whose Aptem coach and LMS coach are different coaches.
+  coachConflicts?: CoachConflict[];  // Per-learner required/completed per window (4w/8w/12w/all) for the home-page
   // PR & MCM performance charts' time-period filter.
   prByLearner?: PeriodCounts;
   mcmByLearner?: PeriodCounts;

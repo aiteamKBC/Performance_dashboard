@@ -70,7 +70,7 @@ const toRecord = (row: CoachRowDTO, weekMeta: WeekMetaDTO[]): CoachSummaryRecord
 });
 
 /**
- * Fetch per-coach weekly attendance, computed live from kbc_attendance.
+ * Fetch per-coach weekly attendance, computed live from the legacy register and the LMS.
  * Provide `before` (a "year-week" key) to page to the older window, or `after`
  * to page to the newer window. They are mutually exclusive.
  */

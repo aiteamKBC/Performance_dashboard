@@ -1,7 +1,7 @@
 """
 Recompute the coach_summary table from live attendance.
 
-Reads kbc_attendance (KBC database) for the latest 10 year-weeks, computes each
+Reads the LMS combined attendance for the latest 10 year-weeks, computes each
 coach's weekly absence ratio + the company "vs" figures, and overwrites the
 coach_summary table in the default database.
 
@@ -18,11 +18,11 @@ from decimal import Decimal
 from django.core.management.base import BaseCommand
 from django.db import connection, transaction
 
-from api.attendance_compute import recent_weeks, compute_week_summary, _active_students_per_coach, _connect
+from api.attendance_compute import recent_weeks, compute_week_summary, _active_learners, _active_students_per_coach
 
 
 class Command(BaseCommand):
-    help = "Recompute coach_summary from the live kbc_attendance data."
+    help = "Recompute coach_summary from the live combined attendance data."
 
     def add_arguments(self, parser):
         parser.add_argument("--weeks", type=int, default=10, help="Number of weeks (columns) to fill. Default 10.")
@@ -32,9 +32,9 @@ class Command(BaseCommand):
         weeks = recent_weeks(n)  # newest first
         self.stdout.write(f"Computing {n} year-weeks: {[f'{y}-W{w}' for y, w in weeks]}")
 
-        with _connect() as kbc:
-            summary = compute_week_summary(weeks, conn=kbc)
-            students = _active_students_per_coach(kbc)
+        learners = _active_learners()
+        summary = compute_week_summary(weeks, learners=learners)
+        students = _active_students_per_coach(learners)
 
         week_keys = [f"{y}-{w}" for (y, w) in weeks]
 

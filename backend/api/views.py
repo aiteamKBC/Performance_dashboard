@@ -5,7 +5,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from .models import CoachesLateness, CoachSummary
 from .serializers import CoachesLatenessSerializer, CoachSummarySerializer
-from .lateness_compute import compute_coaches_lateness, compute_coach_drill
+from .lateness_compute import SOURCES, compute_coaches_lateness, compute_coach_drill
 from .attendance_compute import get_attendance_weeks, get_attendance_drill
 from .action_plan import (
     create_action_plan, list_action_plans, delete_action_plan, get_action_plan_file,
@@ -19,7 +19,11 @@ class CoachesLatenessViewSet(viewsets.ReadOnlyModelViewSet):
         # Computed live from the raw source tables (aptem_auto_extracting,
         # progress_review, MCR) instead of the pre-aggregated coaches_lateness
         # table. See api/lateness_compute.py.
-        return Response(compute_coaches_lateness())
+        # ?source=aptem | lms narrows to one learner source (default: both).
+        source = request.query_params.get("source")
+        if source not in SOURCES:
+            source = None
+        return Response(compute_coaches_lateness(source=source))
 
 
 class CoachDrillView(APIView):
@@ -32,7 +36,12 @@ class CoachDrillView(APIView):
                 case_owner_id = int(case_owner_id)
             except (TypeError, ValueError):
                 case_owner_id = None
-        return Response(compute_coach_drill(coach_name=coach_name, case_owner_id=case_owner_id))
+        source = request.query_params.get("source")
+        if source not in SOURCES:
+            source = None
+        return Response(compute_coach_drill(
+            coach_name=coach_name, case_owner_id=case_owner_id, source=source,
+        ))
 
 class ActionPlanView(APIView):
     """Coach action plans (title + notes), stored in the KBC database.

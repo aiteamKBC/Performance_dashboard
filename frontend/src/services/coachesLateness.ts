@@ -145,11 +145,13 @@ export const deleteActionPlan = async (id: number): Promise<void> => {
 export const fetchCoachDrill = async (
   coach: string,
   caseOwnerId?: number | null,
+  source?: LearnerSource,
 ): Promise<CoachDrill> => {
   const params = new URLSearchParams({ coach });
   if (caseOwnerId !== undefined && caseOwnerId !== null) {
     params.set('case_owner_id', String(caseOwnerId));
   }
+  if (source) params.set('source', source);
   const response = await fetch(buildApiUrl(`/api/coach-drill/?${params.toString()}`));
   if (!response.ok) {
     throw new Error(`Error: ${response.status} ${response.statusText}`);
@@ -157,9 +159,14 @@ export const fetchCoachDrill = async (
   return response.json();
 };
 
-export const fetchCoachesLateness = async (): Promise<CoachRecord[]> => {
+// Which learners to count: Aptem learners only, LMS-only learners, or both
+// (default). The two splits add up to the combined figures.
+export type LearnerSource = 'aptem' | 'lms';
+
+export const fetchCoachesLateness = async (source?: LearnerSource): Promise<CoachRecord[]> => {
   try {
-    const response = await fetch(buildApiUrl('/api/coaches-lateness/'));
+    const query = source ? `?source=${source}` : '';
+    const response = await fetch(buildApiUrl(`/api/coaches-lateness/${query}`));
     if (!response.ok) {
       throw new Error(`Error: ${response.status} ${response.statusText}`);
     }
@@ -353,7 +360,7 @@ export const fetchCoachesLateness = async (): Promise<CoachRecord[]> => {
         mcmCompleted12Weeks,
         mcmCompletionRate12Weeks,
         mcmBehind12Weeks,
-      };
+        coachConflicts: Array.isArray(item.coach_conflicts) ? item.coach_conflicts : [],      };
     });
   } catch (error) {
     console.error('Failed to fetch coaches lateness:', error);

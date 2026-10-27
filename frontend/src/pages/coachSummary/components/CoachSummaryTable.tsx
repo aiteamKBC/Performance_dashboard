@@ -1,5 +1,6 @@
 import type { KeyboardEvent } from "react";
 import { CoachSummaryRecord } from "@/mocks/coachSummary";
+import HeaderTip from "./HeaderTip";
 
 interface CoachSummaryTableProps {
   records: CoachSummaryRecord[];
@@ -14,7 +15,23 @@ interface CoachSummaryTableProps {
   paging?: boolean;
 }
 
-function RatioBadge({ ratio, isOverall }: { ratio: number; isOverall?: boolean }) {
+const COUNT_TIP = "Active learners assigned to the coach — Active on Aptem plus Active / Delivery on the new LMS.";
+const ABS_TIP = "Learners who missed all of their sessions that week ÷ learners who had at least one session. Attending any one session counts as present. Green < 15%, amber 15–25%, red ≥ 25%.";
+const VS_TIP = "This coach's absent learners ÷ all absent learners in the company that week. Shows how much of the company's absence comes from this coach — larger cohorts naturally have a bigger share.";
+const AVG_TIP = (weeks: number) =>
+  `All absent learner-weeks ÷ all learner-weeks with a session, across the ${weeks} weeks shown (weeks with no data don't count).`;
+
+// Shown instead of a ratio when no learner had a session (0% would read as perfect attendance).
+function NoData() {
+  return (
+    <span title="No attendance records for this period" style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
+      No data
+    </span>
+  );
+}
+
+function RatioBadge({ ratio, isOverall, hasData = true }: { ratio: number; isOverall?: boolean; hasData?: boolean }) {
+  if (!hasData) return <NoData />;
   const bg = ratio === 0 ? "var(--color-success-bg)"
     : ratio < 15 ? "var(--color-success-bg)"
     : ratio < 25 ? "var(--color-warning-bg)"
@@ -30,14 +47,14 @@ function RatioBadge({ ratio, isOverall }: { ratio: number; isOverall?: boolean }
   );
 }
 
-function VsCompany({ vs }: { vs: number }) {
-  const color = vs === 100 ? "var(--color-text-muted)"
-    : vs <= 5 ? "var(--color-success)"
+function VsCompany({ vs, hasData = true }: { vs: number; hasData?: boolean }) {
+  if (!hasData) return <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>—</span>;
+  const color = vs <= 5 ? "var(--color-success)"
     : vs <= 15 ? "var(--color-warning)"
     : "var(--color-danger)";
   return (
     <span className="tabular-nums" style={{ fontSize: "var(--text-xs)", color }}>
-      {vs === 100 ? "—" : `${vs}%`}
+      {`${vs}%`}
     </span>
   );
 }
@@ -120,14 +137,22 @@ export default function CoachSummaryTable({ records, onWeekSelect, onPrev, onNex
             </tr>
             <tr>
               <th scope="col" style={{ position: "sticky", left: 0, zIndex: 20, background: "var(--color-canvas)" }} />
-              <th scope="col" className="num" style={{ color: "var(--color-text-muted)", fontWeight: "var(--font-normal)" }}>Count</th>
+              <th scope="col" className="num" style={{ color: "var(--color-text-muted)", fontWeight: "var(--font-normal)" }}>
+                <HeaderTip label="Count" title="Students count">{COUNT_TIP}</HeaderTip>
+              </th>
               {WEEKS.map((wi) => (
                 <>
-                  <th key={`${wi}-abs`} scope="col" style={{ textAlign: "center", borderLeft: "2px solid var(--color-border)", color: "var(--color-text-muted)", fontWeight: "var(--font-normal)" }}>Abs %</th>
-                  <th key={`${wi}-cmp`} scope="col" style={{ textAlign: "center", color: "var(--color-text-muted)", fontWeight: "var(--font-normal)" }}>vs Co.</th>
+                  <th key={`${wi}-abs`} scope="col" style={{ textAlign: "center", borderLeft: "2px solid var(--color-border)", color: "var(--color-text-muted)", fontWeight: "var(--font-normal)" }}>
+                    <HeaderTip label="Abs %" title="Absence ratio">{ABS_TIP}</HeaderTip>
+                  </th>
+                  <th key={`${wi}-cmp`} scope="col" style={{ textAlign: "center", color: "var(--color-text-muted)", fontWeight: "var(--font-normal)" }}>
+                    <HeaderTip label="vs Co." title="Share of company absences">{VS_TIP}</HeaderTip>
+                  </th>
                 </>
               ))}
-              <th scope="col" style={{ textAlign: "center", borderLeft: "2px solid var(--color-border)", color: "var(--color-text-muted)", fontWeight: "var(--font-normal)" }}>Abs %</th>
+              <th scope="col" style={{ textAlign: "center", borderLeft: "2px solid var(--color-border)", color: "var(--color-text-muted)", fontWeight: "var(--font-normal)" }}>
+                <HeaderTip label="Abs %" title={`${weekCount}-week absence ratio`}>{AVG_TIP(weekCount)}</HeaderTip>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -160,15 +185,15 @@ export default function CoachSummaryTable({ records, onWeekSelect, onPrev, onNex
                         title={clickable ? `View ${row.coachName} — ${w.label ?? `week ${wi + 1}`} attendance` : undefined}
                         style={{ padding: "var(--space-2) var(--space-3)", textAlign: "center", borderLeft: "2px solid var(--color-border)", cursor: clickable ? "pointer" : "default" }}
                       >
-                        <RatioBadge ratio={w.absenceRatio} />
+                        <RatioBadge ratio={w.absenceRatio} hasData={(w.expected ?? 0) > 0} />
                       </td>
                       <td key={`${wi}-vs`} style={{ padding: "var(--space-2) var(--space-3)", textAlign: "center" }}>
-                        <VsCompany vs={w.vsCompany} />
+                        <VsCompany vs={w.vsCompany} hasData={(w.expected ?? 0) > 0} />
                       </td>
                     </>
                   ))}
                   <td style={{ padding: "var(--space-2) var(--space-3)", textAlign: "center", borderLeft: "2px solid var(--color-border)" }}>
-                    <RatioBadge ratio={row.last10WeeksAbsenceRatio} />
+                    <RatioBadge ratio={row.last10WeeksAbsenceRatio} hasData={row.weeks.some((w) => (w.expected ?? 0) > 0)} />
                   </td>
                 </tr>
               );
@@ -191,7 +216,7 @@ export default function CoachSummaryTable({ records, onWeekSelect, onPrev, onNex
                 {overall.weeks.map((w, wi) => (
                   <>
                     <td key={`overall-${wi}-abs`} style={{ padding: "var(--space-2) var(--space-3)", textAlign: "center", borderLeft: "2px solid var(--color-border)" }}>
-                      <RatioBadge ratio={w.absenceRatio} isOverall />
+                      <RatioBadge ratio={w.absenceRatio} isOverall hasData={(w.expected ?? 0) > 0} />
                     </td>
                     <td key={`overall-${wi}-vs`} style={{ padding: "var(--space-2) var(--space-3)", textAlign: "center", color: "var(--color-text-muted)", fontSize: "var(--text-xs)" }}>
                       100%
