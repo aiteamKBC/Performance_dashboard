@@ -1,15 +1,15 @@
 """
 Attendance computation for the Coach Summary page.
 
-Roster - the same active learners as the Coaches Performance page (see
-lateness_compute): every *active* learner on the Aptem extract
-(``aptem_auto_extracting``; Alfanar accounts and excluded owners dropped; coach
-taken from Aptem, or from the LMS when the Aptem owner is a placeholder) plus
-the LMS-only learners (Active / Delivery on the new LMS).
+Roster - the same visible LMS caseload as the Coaches Performance page (see
+``lms_caseload``): every learner whose LMS ``programme_status`` is Active or
+Delivery, deduplicated by LMS profile id and assigned by ``coach_email``.
+Excluded case owners are removed using the same dashboard exclusion list.
 
-Attendance - two registers, merged the way the LMS merges them
+Attendance - the LMS's merged register
 (``kbc_sync.combined_attendance_source``): one session per learner per day per
-module, attended if either register says present.
+module, attended if either the legacy or Teams register says present. A raw
+two-register fallback is kept for older deployments without that table.
 
   * ``kbc_attendance`` (KBC main database) - the legacy register.
     ``Attendance`` 0 = absent, > 0 = present, null = not counted.
@@ -37,6 +37,7 @@ company-wide row is 100%.
 
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
+import logging
 import os
 
 import psycopg
@@ -45,6 +46,8 @@ from .lateness_compute import (
     _clean, _fetch_dicts, _is_alfanar, _is_excluded_owner, _lower, _owner_resolver,
 )
 from .lms_source import get_lms_data
+
+log = logging.getLogger(__name__)
 
 # Per (learner, week) a learner counts as "present" if they attended ANY session
 # that week, and "absent" only if they missed every session they had.
@@ -71,14 +74,14 @@ def _kbc_dsn():
 
 
 def _connect():
-    return psycopg.connect(_kbc_dsn())
+    return psycopg.connect(_kbc_dsn(), connect_timeout=10)
 
 
 def _lms_connect():
     dsn = os.environ.get("LMS_DATABASE_URL")
     if not dsn:
         raise RuntimeError("LMS_DATABASE_URL is not configured in the environment.")
-    return psycopg.connect(dsn)
+    return psycopg.connect(dsn, connect_timeout=10)
 
 
 # --------------------------------------------------------------------------
@@ -220,39 +223,20 @@ def format_week_range(year, week):
 # --------------------------------------------------------------------------
 
 def _active_learners():
-    """The Coaches Performance roster: one dict per active learner with their
-    coach, Aptem id / LMS id, name, email and group."""
+    """The exact visible LMS caseload used by Coaches Performance."""
     lms = get_lms_data()
-    resolve = _owner_resolver(lms["coach_by_email"])
     learners = []
-    rows = _fetch_dicts(
-        'SELECT "ID", "FullName", "Email", "OwnerName", "Program-Status", "Group" '
-        'FROM aptem_auto_extracting'
-    )
-    for r in rows:
-        if _lower(r.get("Program-Status")) != "active" or _is_alfanar(r.get("Email")):
-            continue
-        owner, _ = resolve(r.get("OwnerName"), r.get("Email"))
+    for x in lms.get("caseload", []):
+        owner = _clean(x.get("coach"))
         if _is_excluded_owner(owner):
             continue
         learners.append({
             "coach": owner,
-            "aptem_id": r.get("ID"),
-            "lms_id": None,
-            "name": _clean(r.get("FullName")) or "Unknown Learner",
-            "email": _lower(r.get("Email")),
-            "group": _clean(r.get("Group")),
-        })
-    for x in lms["extras"]:
-        if _is_excluded_owner(x["coach"]):
-            continue
-        learners.append({
-            "coach": x["coach"],
-            "aptem_id": None,
-            "lms_id": x["lms_id"],
-            "name": x["name"],
-            "email": _lower(x["email"]),
-            "group": x["programme"],
+            "aptem_id": x.get("aptem_id"),
+            "lms_id": x.get("id"),
+            "name": _clean(x.get("name")) or "Unknown Learner",
+            "email": _lower(x.get("email")),
+            "group": _clean(x.get("programme")),
         })
     for i, l in enumerate(learners):
         l["key"] = i
@@ -293,29 +277,54 @@ def _module_key(value):
 def _attendance_sessions(learners, start, end):
     """Roster learners' sessions between ``start`` and ``end`` (inclusive), as
     (learner, session_date, module, attended) tuples, one per learner/day/module."""
-    with _connect() as conn, conn.cursor() as cur:
-        cur.execute(
-            "SELECT \"ID\", \"Email\", date, COALESCE(NULLIF(btrim(module), ''), lecture_name), "
-            '"Attendance" > 0 '
-            'FROM kbc_attendance '
-            'WHERE date >= %s AND date <= %s AND "Attendance" IS NOT NULL',
-            (start, end),
-        )
-        legacy = cur.fetchall()
-    with _lms_connect() as conn, conn.cursor() as cur:
-        cur.execute(
-            'SELECT l.aptem_id, d.learner_profile_id, d.learner_email, l.email, '
-            "d.session_date, d.module_title, d.attendance_status = 'present' "
-            'FROM "Learner".learner_attendance_details d '
-            'JOIN curriculum.live_session_occurrences o ON o.id = d.occurrence_id '
-            'LEFT JOIN "Learner".learners l ON l.id = d.learner_profile_id '
-            'WHERE d.session_date >= %s AND d.session_date <= %s '
-            "AND o.status = 'completed' "
-            "AND d.attendance_status IN ('present', 'absent') "
-            "AND (d.is_expected OR d.attendance_status = 'present')",
-            (start, end),
-        )
-        lms = cur.fetchall()
+    # This is the merged register produced by the LMS attendance pipeline. It
+    # already resolves legacy + Teams rows to one learner/day/module record.
+    combined = []
+    combined_available = False
+    try:
+        with _lms_connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                'SELECT aptem_ids, lms_profile_ids, learner_email, learner_emails, '
+                'session_date, COALESCE(NULLIF(btrim(module_name), \'\'), module_key), '
+                "lower(btrim(attendance_result)) = 'present' "
+                'FROM kbc_sync.combined_attendance_source '
+                "WHERE session_date >= %s AND session_date <= %s "
+                "AND lower(btrim(attendance_result)) IN ('present', 'absent')",
+                (start, end),
+            )
+            combined = cur.fetchall()
+            combined_available = True
+    except psycopg.Error:
+        # Backward-compatible fallback for deployments that do not yet expose
+        # the merged source table.
+        log.warning("Combined attendance source is unavailable; using raw attendance registers.", exc_info=True)
+        legacy = []
+        try:
+            with _connect() as conn, conn.cursor() as cur:
+                cur.execute(
+                    "SELECT \"ID\", \"Email\", date, COALESCE(NULLIF(btrim(module), ''), lecture_name), "
+                    '"Attendance" > 0 '
+                    'FROM kbc_attendance '
+                    'WHERE date >= %s AND date <= %s AND "Attendance" IS NOT NULL',
+                    (start, end),
+                )
+                legacy = cur.fetchall()
+        except psycopg.Error:
+            log.warning("Legacy KBC attendance is unavailable; using LMS attendance only.", exc_info=True)
+        with _lms_connect() as conn, conn.cursor() as cur:
+            cur.execute(
+                'SELECT l.aptem_id, d.learner_profile_id, d.learner_email, l.email, '
+                "d.session_date, d.module_title, d.attendance_status = 'present' "
+                'FROM "Learner".learner_attendance_details d '
+                'JOIN curriculum.live_session_occurrences o ON o.id = d.occurrence_id '
+                'LEFT JOIN "Learner".learners l ON l.id = d.learner_profile_id '
+                'WHERE d.session_date >= %s AND d.session_date <= %s '
+                "AND o.status = 'completed' "
+                "AND d.attendance_status IN ('present', 'absent') "
+                "AND (d.is_expected OR d.attendance_status = 'present')",
+                (start, end),
+            )
+            lms = cur.fetchall()
 
     match = _learner_matcher(learners)
     merged = {}
@@ -327,10 +336,16 @@ def _attendance_sessions(learners, start, end):
         prev = merged.get(key)
         merged[key] = (learner, d, prev[2] if prev else _clean(module), ok or (prev[3] if prev else False))
 
-    for aptem_id, email, d, module, ok in legacy:
-        add(match(aptem_id, None, [email]), d, module, ok)
-    for aptem_id, lms_id, email, alt_email, d, module, ok in lms:
-        add(match(aptem_id, lms_id, [email, alt_email]), d, module, ok)
+    if combined_available:
+        for aptem_ids, lms_ids, email, emails, d, module, ok in combined:
+            aptem_id = next((x for x in (aptem_ids or []) if x is not None), None)
+            lms_id = next((x for x in (lms_ids or []) if x is not None), None)
+            add(match(aptem_id, lms_id, [email, *(emails or [])]), d, module, ok)
+    else:
+        for aptem_id, email, d, module, ok in legacy:
+            add(match(aptem_id, None, [email]), d, module, ok)
+        for aptem_id, lms_id, email, alt_email, d, module, ok in lms:
+            add(match(aptem_id, lms_id, [email, alt_email]), d, module, ok)
     return list(merged.values())
 
 
@@ -358,13 +373,24 @@ def _coach_week_rows(sessions, start, end):
 
 
 def _active_students_per_coach(learners=None):
-    """{coach: active learners on their roster}, whether or not they have an
-    attendance record in any window. Used for the table's students_count and by
-    the recompute_coach_summary management command."""
+    """Count active learners on each coach's roster.
+
+    Kept for callers that need roster size; the Coach Summary table uses
+    ``_students_seen_per_coach`` because its student column is attendance-window
+    scoped.
+    """
     out = {}
     for l in learners if learners is not None else _active_learners():
         out[l["coach"]] = out.get(l["coach"], 0) + 1
     return out
+
+
+def _students_seen_per_coach(sessions):
+    """Count distinct roster learners with a counted session in the window."""
+    seen = {}
+    for learner, _date, _module, _attended in sessions:
+        seen.setdefault(learner["coach"], set()).add(learner["key"])
+    return {coach: len(keys) for coach, keys in seen.items()}
 
 
 def _ratio(absent, total):
@@ -387,6 +413,7 @@ def compute_week_summary(weeks, learners=None):
     sessions = _attendance_sessions(
         learners, min(s for s, _ in bounds), max(e for _, e in bounds),
     ) if bounds else []
+    seen_students = _students_seen_per_coach(sessions)
 
     result = {}
     for (year, week), (start, end) in zip(weeks, bounds):
@@ -415,6 +442,7 @@ def compute_week_summary(weeks, learners=None):
             },
             "coaches": coaches,
         }
+    result["_students_seen"] = seen_students
     return result
 
 
@@ -455,9 +483,9 @@ def get_attendance_weeks(count=10, before=None, after=None, today=None):
 
     learners = _active_learners()
     summary = compute_week_summary(weeks, learners=learners)
-    # students_count = every active learner on the coach's roster, whether or
-    # not they have an attendance record in the displayed window. (Matches the
-    # recompute_coach_summary command.)
+    # The Students column is the active learner roster, not only learners who
+    # happened to have an attendance row in the displayed window. Attendance
+    # ratios still use the learners with counted sessions for each week.
     students = _active_students_per_coach(learners)
 
     week_keys = [f"{y}-{w}" for (y, w) in weeks]

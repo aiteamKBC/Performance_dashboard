@@ -19,6 +19,7 @@ export default function CoachSummaryPage() {
   const [hasNewer, setHasNewer] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showHighRisk, setShowHighRisk] = useState(false);
+  const [refreshToken, setRefreshToken] = useState(0);
 
   const applyResult = useCallback((result: Awaited<ReturnType<typeof fetchAttendanceWeeks>>) => {
     setRecords(result.records);
@@ -42,7 +43,7 @@ export default function CoachSummaryPage() {
       }
     };
     loadData();
-  }, [applyResult]);
+  }, [applyResult, refreshToken]);
 
   const goPrev = useCallback(async () => {
     if (!oldestWeekKey || paging) return;
@@ -140,9 +141,24 @@ export default function CoachSummaryPage() {
 
       <AppShell
         topbarLeft={
-          <h1 style={{ margin: 0, fontSize: "var(--text-md)", fontWeight: "var(--font-semibold)" }}>
-            Coach Summary
-          </h1>
+          <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)" }}>
+            <h1 style={{ margin: 0, fontSize: "var(--text-md)", fontWeight: "var(--font-semibold)" }}>
+              Coach Summary
+            </h1>
+            <button
+              type="button"
+              onClick={() => setRefreshToken((value) => value + 1)}
+              disabled={loading}
+              style={{
+                border: "1px solid var(--color-border)", borderRadius: "var(--radius-md)",
+                background: "var(--color-surface)", color: "var(--color-text-secondary)",
+                padding: "4px 10px", cursor: loading ? "wait" : "pointer", fontSize: "var(--text-xs)",
+              }}
+              title="Reload live attendance data"
+            >
+              ↻ Refresh data
+            </button>
+          </div>
         }
       >
         <div className="page-layout">

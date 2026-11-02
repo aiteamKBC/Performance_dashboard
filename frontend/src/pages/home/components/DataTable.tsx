@@ -26,7 +26,8 @@ function EngagementBadge({ value }: { value: number }) {
   );
 }
 
-function RiskDot({ value, warn, danger }: { value: number; warn: number; danger: number }) {
+function RiskDot({ value, warn, danger }: { value: number | null; warn: number; danger: number }) {
+  if (value == null) return <span title="History unavailable">—</span>;
   const color = value >= danger ? "#ff7a7a" : value >= warn ? "#7c4daa" : "#a8f0c6";
   return (
     <span className="flex items-center gap-1.5 font-mono text-xs whitespace-nowrap" style={{ color }}>
@@ -79,9 +80,9 @@ export default function DataTable({ records }: DataTableProps) {
     { key: "totalLearners", label: "Total Learners", short: "Learners" },
     { key: "recentSubmitters", label: "Recent Submitters", short: "Submitters" },
     { key: "learnerEngagement", label: "Engagement" },
-    { key: "otjhOnTrack", label: "On Track <10%", short: "On Track" },
-    { key: "otjhNeedAttention", label: "Attention 11–25%", short: "Attention" },
-    { key: "otjhAtRisk", label: "At Risk >25%", short: "At Risk" },
+    { key: "otjhOnTrack", label: "On Track (deficit ≤20h)", short: "On Track" },
+    { key: "otjhNeedAttention", label: "Need attention (>20h to 40h)", short: "Attention" },
+    { key: "otjhAtRisk", label: "At Risk (deficit >40h)", short: "At Risk" },
     { key: "lastWeekPending", label: "LW Pending", short: "LW Pend" },
     { key: "pending", label: "Pending" },
     { key: "markingProgressWeekly", label: "Marking/Wk", short: "Marking" },
@@ -192,7 +193,7 @@ export default function DataTable({ records }: DataTableProps) {
                     <RiskDot value={r.pending} warn={12} danger={20} />
                   </td>
                   {/* Marking weekly */}
-                  <td className="px-3 py-3 whitespace-nowrap text-xs text-[#a8f0c6] font-mono">{r.markingProgressWeekly}</td>
+                  <td className="px-3 py-3 whitespace-nowrap text-xs text-[#a8f0c6] font-mono">{r.markingProgressWeekly ?? "—"}</td>
                   {/* Evidence Accepted */}
                   <td className="px-3 py-3 whitespace-nowrap text-xs text-white/70 font-mono">{r.evidenceAccepted}</td>
                   {/* Evidence Referred */}

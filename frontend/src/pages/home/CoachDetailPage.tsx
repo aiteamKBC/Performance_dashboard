@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useNavigate, useSearchParams } from "react-router-dom";
+import { useEffect, useMemo, useState } from "react";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
   PieChart, Pie, Cell, Legend, LineChart, Line,
@@ -7,20 +7,14 @@ import {
 import type { CoachRecord } from "@/mocks/dashboard";
 import {
   fetchCoachesLateness, fetchCoachDrill,
-  type CoachDrill, type LearnerSource,
+  type CoachDrill,
 } from "@/services/coachesLateness";
-
-const SOURCE_LABEL: Record<LearnerSource, string> = { aptem: "APTEM", lms: "LMS" };
-
-function parseSource(value: string | null): LearnerSource | undefined {
-  return value === "aptem" || value === "lms" ? value : undefined;
-}
 import AppShell from "@/components/AppShell";
 import MetricBreakdownTable from "./components/MetricBreakdownTable";
 import ActionPlanModal from "./components/ActionPlanModal";
 import ActiveLearnersNote from "./components/ActiveLearnersNote";
 import CoachConflictsBanner from "./components/CoachConflictsBanner";
-import { otjhVariance, otjhStatusFromVariance } from "@/utils/otjh";
+import { formatDate, toLearnerView } from "@/utils/learners";
 
 const STATUS_COLOR: Record<string, string> = {
   "On Track": "#16A34A",
@@ -60,70 +54,55 @@ function KpiCard({ label, value, sub, onClick }: { label: string; value: string 
 export default function CoachDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  // ?source=aptem | lms narrows the page to one learner source (none = both).
-  const [searchParams, setSearchParams] = useSearchParams();
-  const source = parseSource(searchParams.get("source"));
-  // The coach's all-learners record (the :id in the URL indexes this list);
-  // ``record`` is the same coach's record for the selected source.
-  const [baseRecord, setBaseRecord] = useState<CoachRecord | null>(null);
+  // Set when opened from a coach card (see Home's openCoach).
+  const opener = useLocation().state as { coach?: string; caseOwnerId?: number | null } | null;
   const [record, setRecord] = useState<CoachRecord | null>(null);
   const [drill, setDrill] = useState<CoachDrill | null>(null);
-  // Which coach + source ``record`` belongs to. While it differs from the
-  // current URL (first load, or right after switching APTEM / LMS) the old
-  // record is hidden, so a stale source's numbers never show under the new label.
-  const viewKey = `${id}:${source ?? "all"}`;
-  const [recordKey, setRecordKey] = useState<string | null>(null);
-  const ready = recordKey === viewKey;
-  // The all-learners list only depends on the coach, not the source: keep it
-  // across source switches instead of refetching it.
-  const baseCache = useRef<{ id: string; record: CoachRecord | null } | null>(null);
+  const [loading, setLoading] = useState(true);
   const [drillLoading, setDrillLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [highlightedSection, setHighlightedSection] = useState<string | null>(null);
   const [breakdownMetric, setBreakdownMetric] = useState<string>("ALL");
   const [showActionPlan, setShowActionPlan] = useState(false);
 
-  // Scroll to the metric breakdown table, optionally pre-filtering by metric,
-  // and briefly highlight it.
+  // Scroll to the metric breakdown table, optionally
+  // pre-filtering by metric, and briefly highlight it.
   const scrollToBreakdown = (metricKey: string) => {
     setBreakdownMetric(metricKey);
-    const el = document.getElementById("metric-breakdown");
-    if (!el) return;
-    el.scrollIntoView({ behavior: "smooth", block: "start" });
-    setHighlightedSection("metric-breakdown");
     window.setTimeout(() => {
-      setHighlightedSection((cur) => (cur === "metric-breakdown" ? null : cur));
-    }, 1600);
+      const el = document.getElementById("metric-breakdown");
+      if (!el) return;
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      setHighlightedSection("metric-breakdown");
+      window.setTimeout(() => {
+        setHighlightedSection((cur) => (cur === "metric-breakdown" ? null : cur));
+      }, 1600);
+    }, 0);
   };
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       try {
+        setLoading(true);
         setDrillLoading(true);
         setError(null);
         setDrill(null);
-        let base: CoachRecord | null;
-        if (baseCache.current?.id === String(id)) {
-          base = baseCache.current.record;
-        } else {
-          const all = await fetchCoachesLateness();
-          base = all.find((r) => String(r.id) === String(id)) ?? null;
-          baseCache.current = { id: String(id), record: base };
-          if (cancelled) return;
-          setBaseRecord(base);
-        }
-        // Record ids are per-response indexes, so find the source record by name.
-        const rec = base && source
-          ? (await fetchCoachesLateness(source)).find((r) => r.coach === base.coach) ?? null
-          : base;
+        // Coming from a coach card we already know the coach, so the learner
+        // detail loads alongside the coach list instead of after it.
+        const early = opener?.coach
+          ? fetchCoachDrill(opener.coach, opener.caseOwnerId).catch(() => null)
+          : null;
+        const all = await fetchCoachesLateness();
+        const rec = all.find((r) => String(r.id) === String(id)) ?? null;
         if (cancelled) return;
         setRecord(rec);
-        setRecordKey(`${id}:${source ?? "all"}`);
+        setLoading(false);
         // Header/KPIs can render now; the learner detail loads separately.
         if (rec) {
           try {
-            const d = await fetchCoachDrill(rec.coach, rec.caseOwnerId, source);
+            const d = (early && rec.coach === opener?.coach ? await early : null)
+              ?? await fetchCoachDrill(rec.coach, rec.caseOwnerId);
             if (!cancelled) setDrill(d);
           } catch (err) {
             if (!cancelled) {
@@ -140,15 +119,16 @@ export default function CoachDetailPage() {
         if (!cancelled) {
           console.error("Failed to load coach detail:", err);
           setError("Failed to load coach details.");
+          setLoading(false);
           setDrillLoading(false);
         }
       }
     };
     load();
     return () => { cancelled = true; };
-  }, [id, source]);
+  }, [id, opener?.coach, opener?.caseOwnerId]);
 
-  // OTJH band counts, derived from the same variance-based status as the Metric
+  // OTJH band counts use the same LMS status as the Metric
   // Breakdown table (computed per learner from the drill rows), so the KPI card,
   // the pie chart, and the table all show the same numbers. Falls back to the
   // record's source counts until the drill loads.
@@ -157,7 +137,7 @@ export default function CoachDetailPage() {
     if (drill?.per_learner?.length) {
       for (const l of drill.per_learner) {
         if (!l.otjh_status) continue;
-        const band = otjhStatusFromVariance(otjhVariance(l.completed, l.otjh_progress_hours), l.otjh_status);
+        const band = toLearnerView(l).otjhBand;
         if (band in counts) counts[band] += 1;
       }
     } else if (record) {
@@ -235,6 +215,12 @@ export default function CoachDetailPage() {
     ];
   }, [record]);
 
+  const weekRangeLabel = drill?.week_start && drill.week_end
+    ? `${formatDate(drill.week_start)} – ${formatDate(drill.week_end)}`
+    : "Current work week";
+  const drillMetricValue = (value: number | undefined) =>
+    drillLoading && !drill ? "…" : (value ?? 0);
+
   return (
     <AppShell
       topbarLeft={
@@ -254,52 +240,26 @@ export default function CoachDetailPage() {
       <div className="page-layout">
         {error && <div role="alert" style={{ color: "var(--color-danger)" }}>{error}</div>}
 
-        {/* Learner source switch (APTEM / LMS) — stays put while a source loads */}
-        {baseRecord && (
-          <div role="group" aria-label="Learner source" style={{ display: "flex", gap: "var(--space-2)" }}>
-            {(Object.keys(SOURCE_LABEL) as LearnerSource[]).map((s) => {
-              const active = s === source;
-              return (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => setSearchParams({ source: s }, { replace: true })}
-                  aria-pressed={active}
-                  className={active ? "btn btn--primary" : "btn btn--secondary"}
-                >
-                  {SOURCE_LABEL[s]} learners
-                </button>
-              );
-            })}
-          </div>
+        {record && <ActiveLearnersNote />}
+
+        {record && (
+          <CoachConflictsBanner coachName={record.coach} conflicts={record.coachConflicts ?? []} />
         )}
 
-        {baseRecord && <ActiveLearnersNote />}
-
-        {baseRecord && (
-          <CoachConflictsBanner coachName={baseRecord.coach} conflicts={baseRecord.coachConflicts ?? []} />
-        )}
-
-        {!ready && !error && (
+        {loading && !error && (
           <div style={{ padding: "var(--space-8)", textAlign: "center", color: "var(--color-text-secondary)" }}>
             <i className="ri-loader-4-line" style={{ fontSize: 32, color: "var(--color-accent)", animation: "spin 1s linear infinite" }} aria-hidden="true" />
-            <p style={{ marginTop: "var(--space-3)" }}>
-              {baseRecord && source ? `Loading ${SOURCE_LABEL[source]} learners…` : "Loading coach…"}
-            </p>
+            <p style={{ marginTop: "var(--space-3)" }}>Loading coach…</p>
           </div>
         )}
 
-        {ready && !record && (
+        {!loading && !record && !error && (
           <div className="empty-state" style={{ padding: "var(--space-8)" }}>
-            <p className="empty-state-title">
-              {baseRecord && source
-                ? `${baseRecord.coach} has no ${SOURCE_LABEL[source]} learners`
-                : "Coach not found"}
-            </p>
+            <p className="empty-state-title">Coach not found</p>
           </div>
         )}
 
-        {ready && record && (
+        {!loading && record && (
           <>
             {/* Heading */}
             <div className="page-heading-row">
@@ -315,7 +275,7 @@ export default function CoachDetailPage() {
                 <div>
                   <h2 style={{ margin: 0, color: "var(--color-text-primary)" }}>{record.coach}</h2>
                   <p style={{ margin: "var(--space-1) 0 0", color: "var(--color-text-secondary)", fontSize: "var(--text-sm)" }}>
-                    {record.totalLearners} active {source ? `${SOURCE_LABEL[source]} ` : ""}learners · last submission {record.lastSubDate || "—"}
+                    {record.totalLearners} learners · last submission {record.lastSubDate || "—"}
                   </p>
                 </div>
               </div>
@@ -329,15 +289,14 @@ export default function CoachDetailPage() {
               </button>
             </div>
 
-            {/* KPI header */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: "var(--space-3)" }}>
-              <KpiCard label="Total Learners" value={record.totalLearners} onClick={() => scrollToBreakdown("ALL")} />
-              <KpiCard label="Learners Engagement" value={`${record.learnerEngagement}%`} sub={`${record.recentSubmitters} recent submitters`} onClick={() => scrollToBreakdown("RECENT")} />
-              <KpiCard label="OTJH At Risk" value={otjhCounts["At Risk"]} sub={`${otjhCounts["Need Attention"]} need attention`} onClick={() => scrollToBreakdown("OTJH")} />
-              <KpiCard label="PR 12-Week" value={`${record.prOverallCompletionRate}%`} sub={`${record.prOverallCompleted}/${record.prOverallRequired} completed`} onClick={() => scrollToBreakdown("PR")} />
-              <KpiCard label="Evidence Pending" value={record.pending} sub={`${record.evidenceAccepted} accepted`} onClick={() => scrollToBreakdown("PENDING")} />
-              <KpiCard label="Referred Closure" value={record.referredClosure} onClick={() => scrollToBreakdown("CLOSURE")} />
-              <KpiCard label="MCM 4-Week" value={`${record.mcmCompletionRate4Weeks ?? 0}%`} sub={`${record.mcmCompleted4Weeks ?? 0}/${record.mcmRequired4Weeks ?? 0} completed`} onClick={() => scrollToBreakdown("MCM")} />
+            {/* KPI header — all six cards use the same LMS coach population. */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "var(--space-3)" }}>
+              <KpiCard label="Total learners" value={record.totalLearners} sub="Your caseload" onClick={() => scrollToBreakdown("ALL")} />
+              <KpiCard label="OTJH at risk" value={otjhCounts["At Risk"]} sub={`${otjhCounts["Need Attention"]} need attention`} onClick={() => scrollToBreakdown("OTJH")} />
+              <KpiCard label="Pending marking" value={record.pending} sub="Pending submissions" onClick={() => scrollToBreakdown("PENDING")} />
+              <KpiCard label="PR this week" value={drillMetricValue(drill?.pr_this_week)} sub={`Progress reviews · ${weekRangeLabel}`} onClick={() => scrollToBreakdown("PR")} />
+              <KpiCard label="MCM this week" value={drillMetricValue(drill?.mcm_this_week)} sub={`Monthly coaching · ${weekRangeLabel}`} onClick={() => scrollToBreakdown("MCM")} />
+              <KpiCard label="Catch-ups this week" value={drillMetricValue(drill?.catchups_this_week)} sub={`Catch-up sessions · ${weekRangeLabel}`} />
             </div>
 
             {/* Charts */}
@@ -400,8 +359,7 @@ export default function CoachDetailPage() {
               </div>
             </div>
 
-            {/* Learner detail is fetched after the header/KPIs; show a loader
-                so we never display an empty "Learners (0)" mid-load. */}
+            {/* Learner detail loads separately from the coach summary. */}
             {drillLoading && !drill && (
               <div className="table-card" style={{ padding: "var(--space-8)", textAlign: "center", color: "var(--color-text-secondary)" }}>
                 <i className="ri-loader-4-line" style={{ fontSize: 28, color: "var(--color-accent)", animation: "spin 1s linear infinite" }} aria-hidden="true" />
@@ -425,7 +383,6 @@ export default function CoachDetailPage() {
                 <MetricBreakdownTable learners={drill.per_learner} reviewRows={drill.review_rows} initialMetric={breakdownMetric} coachName={record.coach} />
               </div>
             )}
-
           </>
         )}
       </div>
@@ -433,7 +390,7 @@ export default function CoachDetailPage() {
       {record && showActionPlan && (
         <ActionPlanModal
           coachName={record.coach}
-          caseOwnerId={baseRecord?.caseOwnerId ?? record.caseOwnerId}
+          caseOwnerId={record.caseOwnerId}
           onClose={() => setShowActionPlan(false)}
         />
       )}

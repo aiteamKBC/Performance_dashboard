@@ -12,8 +12,9 @@ type SortDir = "asc" | "desc";
 function Chip({
   value, good, warn, suffix = "", invert = false,
 }: {
-  value: number; good: number; warn: number; suffix?: string; invert?: boolean;
+  value: number | null; good: number; warn: number; suffix?: string; invert?: boolean;
 }) {
+  if (value == null) return <span title="History unavailable">—</span>;
   let tone: "good" | "warn" | "risk" = "good";
   if (invert) {
     if (value >= warn) tone = "risk";
@@ -53,6 +54,7 @@ export default function MasterTable({ records, onRowClick }: MasterTableProps) {
   const [sortDir, setSortDir] = useState<SortDir>("asc");
 
   const getMarkingProgressWeekly = (record: CoachRecord) => {
+    if (record.lastWeekPending == null) return null;
     if (record.lastWeekPending <= 0) return 0;
     return (record.lastWeekPending - record.pending) / record.lastWeekPending;
   };
@@ -62,7 +64,8 @@ export default function MasterTable({ records, onRowClick }: MasterTableProps) {
     return record[key];
   };
 
-  const formatMarkingProgressWeekly = (value: number) => {
+  const formatMarkingProgressWeekly = (value: number | null) => {
+    if (value == null) return "—";
     const percentage = (value * 100).toFixed(2);
     return `${percentage.replace(/\.00$/, "").replace(/(\.\d*[1-9])0+$/, "$1")}%`;
   };
@@ -82,7 +85,8 @@ export default function MasterTable({ records, onRowClick }: MasterTableProps) {
       : String(bv).localeCompare(String(av));
   });
 
-  const totalLastWeekPending = records.reduce((s, r) => s + r.lastWeekPending, 0);
+  const totalLastWeekPending = records.some((r) => r.lastWeekPending == null)
+    ? null : records.reduce((s, r) => s + (r.lastWeekPending ?? 0), 0);
   const totalPending = records.reduce((s, r) => s + r.pending, 0);
   const totalReferredClosure = records.reduce((s, r) => s + r.referredClosure, 0);
 
@@ -95,7 +99,7 @@ export default function MasterTable({ records, onRowClick }: MasterTableProps) {
     otjhAtRisk: records.reduce((s, r) => s + r.otjhAtRisk, 0),
     lastWeekPending: totalLastWeekPending,
     pending: totalPending,
-    markingProgressWeekly: totalLastWeekPending > 0
+    markingProgressWeekly: totalLastWeekPending == null ? null : totalLastWeekPending > 0
       ? (totalLastWeekPending - totalPending) / totalLastWeekPending : 0,
     referredClosure: totalReferredClosure,
     evToday: records.reduce((s, r) => s + (r.evToday ?? 0), 0),

@@ -2,8 +2,9 @@ export type ReviewPeriodKey = "4w" | "8w" | "12w" | "all";
 export type PeriodCounts = Record<ReviewPeriodKey, { required: number; completed: number }>;
 
 export interface CoachConflict {
-  // "coach": different coach on Aptem and the LMS (counted under Aptem's).
-  // "status": Active on the LMS but not on Aptem (not counted).
+  // "coach": different coach on Aptem and the LMS (counted under the LMS coach).
+  // "status": Active on one system but not the other (counted only when
+  // Active / Delivery on the LMS; see ``counted``).
   kind?: "coach" | "status";
   name: string;
   email: string;
@@ -11,6 +12,8 @@ export interface CoachConflict {
   lms_coach: string;
   aptem_status?: string;
   lms_status?: string;
+  // Whether the learner is in the dashboard's numbers (on the LMS caseload).
+  counted?: boolean;
 }
 
 // Badge / heading label for a coach's conflicts, by the kinds present.
@@ -34,6 +37,8 @@ export interface CoachRecord {
   totalLearners: number;
   recentSubmitters: number;
   learnerEngagement: number;
+  // Average attendance rate (%) from the LMS; null when the LMS has none.
+  attendanceRate?: number | null;
   otjhOnTrack: number;
   otjhNormal?: number;
   otjhNeedAttention: number;
@@ -42,12 +47,13 @@ export interface CoachRecord {
   otjhVarOnTrack?: number;
   otjhVarNeedAttention?: number;
   otjhVarAtRisk?: number;
-  lastWeekPending: number;
+  lastWeekPending: number | null;
   pending: number;
-  markingProgressWeekly: number;
+  markingProgressWeekly: number | null;
   evidenceAccepted: number;
   evidenceReferred: number;
   referredClosure: number;
+  referredClosureAvailable?: boolean;
   referredClosurePct: number;
   totalEvidence: number;
   prToday: number;
@@ -69,6 +75,8 @@ export interface CoachRecord {
   prOverallCompleted: number;
   prOverallBehind: number;
   prOverallCompletionRate: number;
+  // Integer percentage returned by the LMS coach-directory performance rule.
+  prLmsRate?: number | null;
   prRequired12Weeks?: number;
   prCompleted12Weeks?: number;
   prCompletionRate12Weeks?: number;
@@ -91,7 +99,7 @@ export interface CoachRecord {
   // PR & MCM performance charts' time-period filter.
   prByLearner?: PeriodCounts;
   mcmByLearner?: PeriodCounts;
-  // Daily evidence submission buckets (from the Require Marking table).
+  // Daily marking-submission buckets (from the New LMS).
   evToday?: number;
   evYesterday?: number;
   evMinus2?: number;

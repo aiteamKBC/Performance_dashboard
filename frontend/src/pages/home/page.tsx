@@ -1,8 +1,7 @@
 import { useMemo, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import type { CoachRecord } from "@/mocks/dashboard";
-import { fetchCoachesLateness, type LearnerSource } from "@/services/coachesLateness";
-import SourcePickerModal from "./components/SourcePickerModal";
+import { fetchCoachesLateness } from "@/services/coachesLateness";
 import ActiveLearnersNote from "./components/ActiveLearnersNote";
 import { TopbarLeft, TopbarRight } from "./components/DashboardHeader";
 import ChartsSection from "./components/ChartsSection";
@@ -13,37 +12,73 @@ export default function Home() {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCoach, setActiveCoach] = useState("All");
-  // Combined records drive the cards and charts; the per-source records only
-  // supply the learner counts shown in the APTEM / LMS picker.
   const [coachRecords, setCoachRecords] = useState<CoachRecord[]>([]);
-  const [aptemRecords, setAptemRecords] = useState<CoachRecord[]>([]);
-  const [lmsRecords, setLmsRecords] = useState<CoachRecord[]>([]);
-  const [pickerFor, setPickerFor] = useState<CoachRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [refreshToken, setRefreshToken] = useState(0);
 
   useEffect(() => {
+    const controller = new AbortController();
+    // The first request after a backend restart may hydrate the LMS cache;
+    // subsequent requests are served from the backend response cache.
+    const timeoutId = window.setTimeout(() => controller.abort(), 90_000);
+
+    const waitBeforeRetry = (delayMs: number) => new Promise<void>((resolve, reject) => {
+      const retryTimeoutId = window.setTimeout(resolve, delayMs);
+      controller.signal.addEventListener("abort", () => {
+        window.clearTimeout(retryTimeoutId);
+        reject(new DOMException("The request was aborted", "AbortError"));
+      }, { once: true });
+    });
+
     const loadData = async () => {
-      try {
-        setLoading(true);
-        setError(null);
-        const [all, aptem, lms] = await Promise.all([
-          fetchCoachesLateness(),
-          fetchCoachesLateness("aptem"),
-          fetchCoachesLateness("lms"),
-        ]);
-        setCoachRecords(all);
-        setAptemRecords(aptem);
-        setLmsRecords(lms);
-      } catch (err) {
-        console.error('Failed to load coaches lateness data:', err);
-        setError('Failed to load data from API.');
-      } finally {
-        setLoading(false);
+      setLoading(true);
+      setError(null);
+
+      // The endpoint can be briefly unavailable while Django or its source
+      // connections are starting. Retry transient failures before surfacing an
+      // error, while only forcing a backend refresh on the first attempt.
+      const retryDelays = [1000, 3000];
+      for (let attempt = 0; attempt <= retryDelays.length; attempt += 1) {
+        try {
+          setCoachRecords(await fetchCoachesLateness({
+            signal: controller.signal,
+            refresh: refreshToken > 0 && attempt === 0,
+          }));
+          setLoading(false);
+          window.clearTimeout(timeoutId);
+          return;
+        } catch (err) {
+          if (controller.signal.aborted || attempt === retryDelays.length) {
+            console.error('Failed to load coaches lateness data:', err);
+            setError(
+              controller.signal.aborted
+                ? 'Loading coaches data is taking too long. Please try again.'
+                : 'Failed to load data from API.',
+            );
+            setLoading(false);
+            window.clearTimeout(timeoutId);
+            return;
+          }
+
+          try {
+            await waitBeforeRetry(retryDelays[attempt]);
+          } catch (retryError) {
+            console.error('Failed to load coaches lateness data:', retryError);
+            setLoading(false);
+            window.clearTimeout(timeoutId);
+            return;
+          }
+        }
       }
     };
     loadData();
-  }, []);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timeoutId);
+    };
+  }, [refreshToken]);
 
   const coaches = useMemo(() => {
     const set = new Set(coachRecords.map((r) => r.coach));
@@ -63,13 +98,9 @@ export default function Home() {
     });
   }, [searchQuery, activeCoach, coachRecords]);
 
-  const learnersIn = (rows: CoachRecord[], coach: string) =>
-    rows.find((r) => r.coach === coach)?.totalLearners ?? 0;
-
-  const openCoach = (r: CoachRecord, source: LearnerSource) => {
-    setPickerFor(null);
-    navigate(`/coach/${r.id}?source=${source}`);
-  };
+  // The coach name lets the coach page start loading its learners at once.
+  const openCoach = (r: CoachRecord) =>
+    navigate(`/coach/${r.id}`, { state: { coach: r.coach, caseOwnerId: r.caseOwnerId } });
 
   const getLatestSnapshotDate = (rows: CoachRecord[]) => {
     const normalizedDates = rows
@@ -93,7 +124,7 @@ export default function Home() {
   return (
     <>
       {/* Loading overlay */}
-      {loading && (
+      {loading && coachRecords.length === 0 && (
         <div style={{
           position: "fixed", inset: 0,
           background: "rgba(247,248,250,0.85)",
@@ -147,29 +178,32 @@ export default function Home() {
                 Coaching cohort metrics, evidence pipeline, and learner risk signals
               </p>
             </div>
+            <button
+              type="button"
+              onClick={() => setRefreshToken((value) => value + 1)}
+              disabled={loading}
+              style={{
+                display: "inline-flex", alignItems: "center", gap: "var(--space-2)",
+                border: "1px solid var(--color-border)", borderRadius: "var(--radius-md)",
+                background: "var(--color-surface)", color: "var(--color-text-primary)",
+                padding: "var(--space-2) var(--space-3)", cursor: loading ? "wait" : "pointer",
+                opacity: loading ? 0.6 : 1,
+              }}
+            >
+              <i className={loading ? "ri-loader-4-line" : "ri-refresh-line"} aria-hidden="true" />
+              {loading ? "Refreshing…" : "Refresh data"}
+            </button>
           </div>
 
           <ActiveLearnersNote />
 
-          {/* Coach cards (all learners) — click to choose APTEM or LMS learners */}
-          <CoachCards records={filtered} onSelect={setPickerFor} />
+          {/* Coach cards — click to open the coach's learners */}
+          <CoachCards records={filtered} onSelect={openCoach} />
 
           {/* Chart row */}
           <ChartsSection records={filtered} />
         </div>
       </AppShell>
-
-      {pickerFor && (
-        <SourcePickerModal
-          coachName={pickerFor.coach}
-          counts={{
-            aptem: learnersIn(aptemRecords, pickerFor.coach),
-            lms: learnersIn(lmsRecords, pickerFor.coach),
-          }}
-          onPick={(source) => openCoach(pickerFor, source)}
-          onClose={() => setPickerFor(null)}
-        />
-      )}
 
       <style>{`
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }

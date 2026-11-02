@@ -42,7 +42,7 @@ interface Agg {
   name: string;
   totalLearners: number; recentSubmitters: number;
   evidenceReferred: number; referredClosure: number;
-  lastWeekPending: number; pending: number;
+  lastWeekPending: number | null; pending: number;
   prRequired4Weeks: number; prCompleted4Weeks: number; prDoneOld4Weeks: number;
   prOverallRequired: number; prOverallCompleted: number;
   otjhOnTrack: number; otjhNormal: number; otjhNeedAttention: number; otjhAtRisk: number;
@@ -64,7 +64,7 @@ function aggregate(records: CoachRecord[]): Agg[] {
     a.recentSubmitters   += r.recentSubmitters;
     a.evidenceReferred   += r.evidenceReferred;
     a.referredClosure    += r.referredClosure;
-    a.lastWeekPending    += r.lastWeekPending;
+    a.lastWeekPending = a.lastWeekPending == null || r.lastWeekPending == null ? null : a.lastWeekPending + r.lastWeekPending;
     a.pending            += r.pending;
     a.prRequired4Weeks   += r.prRequired4Weeks;
     a.prCompleted4Weeks  += r.prCompleted4Weeks;
@@ -141,8 +141,9 @@ const CHARTS: ChartDef[] = [
   {
     id: "marking",
     title: "Marking Progress Weekly",
-    subtitle: "week over week (%)",
+    subtitle: "Prior-week history unavailable",
     buildData: (agg) => agg.map((r) => {
+      if (r.lastWeekPending == null) return { name: r.name, Marking: null };
       const raw = r.lastWeekPending > 0
         ? ((r.lastWeekPending - r.pending) / r.lastWeekPending) * 100
         : (r.pending > 0 ? -100 : 0);
@@ -253,8 +254,8 @@ const CHARTS: ChartDef[] = [
   },
   {
     id: "assignment",
-    title: "Last Week & Current Week Assignment",
-    subtitle: "CaseOwner",
+    title: "Pending Marking",
+    subtitle: "Current LMS queue; prior-week history unavailable",
     buildData: (agg) => agg.map((r) => ({
       name: r.name,
       "Last Week": r.lastWeekPending,

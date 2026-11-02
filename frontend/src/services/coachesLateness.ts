@@ -31,12 +31,17 @@ export interface DrillLearnerRow {
   programme: string;
   otjh_status: string;
   submitted: number;
-  completed: number;
-  planned: number;
+  completed: number | null;
+  planned: number | null;
   minimum: number;
   otjh_target: string;
   otjh_progress_hours: string;
   otjh_progress_variance: string;
+  otjh_source?: string;
+  otjh_as_of?: string | null;
+  otjh_target_hours?: number | null;
+  otjh_percent?: number | null;
+  otjh_shortfall_hours?: number | null;
   pending: number;
   referred_closure: number;
   total_evidence: number;
@@ -45,6 +50,21 @@ export interface DrillLearnerRow {
   pr_date: string;
   mcm_status: string;
   mcm_date: string;
+  // Latest completed PR / MCM (ISO date, "" if none).
+  pr_last_completed: string;
+  mcm_last_completed: string;
+  // LMS side of the learner (blank / 0 when the LMS has no record).
+  lms_id: number | null;
+  uuid: string;
+  status: string;
+  cohort: string;
+  group: string;
+  start_date: string;
+  activities_done: number;
+  activities_total: number;
+  attendance_done: number;
+  attendance_total: number;
+  last_activity: string;
 }
 
 export interface ReviewRow {
@@ -60,6 +80,12 @@ export interface CoachDrill {
   coach: string;
   case_owner_id: number | null;
   per_learner: DrillLearnerRow[];
+  // The coach's learners' catch-up sessions this work week (Mon–Fri).
+  catchups_this_week: number;
+  week_start?: string;
+  week_end?: string;
+  pr_this_week?: number;
+  mcm_this_week?: number;
   review_rows: ReviewRow[];
   sections: DrillSection[];
 }
@@ -145,13 +171,11 @@ export const deleteActionPlan = async (id: number): Promise<void> => {
 export const fetchCoachDrill = async (
   coach: string,
   caseOwnerId?: number | null,
-  source?: LearnerSource,
 ): Promise<CoachDrill> => {
   const params = new URLSearchParams({ coach });
   if (caseOwnerId !== undefined && caseOwnerId !== null) {
     params.set('case_owner_id', String(caseOwnerId));
   }
-  if (source) params.set('source', source);
   const response = await fetch(buildApiUrl(`/api/coach-drill/?${params.toString()}`));
   if (!response.ok) {
     throw new Error(`Error: ${response.status} ${response.statusText}`);
@@ -159,14 +183,12 @@ export const fetchCoachDrill = async (
   return response.json();
 };
 
-// Which learners to count: Aptem learners only, LMS-only learners, or both
-// (default). The two splits add up to the combined figures.
-export type LearnerSource = 'aptem' | 'lms';
-
-export const fetchCoachesLateness = async (source?: LearnerSource): Promise<CoachRecord[]> => {
+export const fetchCoachesLateness = async (options?: { signal?: AbortSignal; refresh?: boolean }): Promise<CoachRecord[]> => {
   try {
-    const query = source ? `?source=${source}` : '';
-    const response = await fetch(buildApiUrl(`/api/coaches-lateness/${query}`));
+    const path = options?.refresh ? '/api/coaches-lateness/?refresh=1' : '/api/coaches-lateness/';
+    const response = await fetch(buildApiUrl(path), {
+      signal: options?.signal,
+    });
     if (!response.ok) {
       throw new Error(`Error: ${response.status} ${response.statusText}`);
     }
@@ -235,7 +257,7 @@ export const fetchCoachesLateness = async (source?: LearnerSource): Promise<Coac
         ? Math.round((referredClosure / evidenceReferred) * 10000) / 100
         : 0;
 
-      // Daily evidence buckets + 7-day total, from the Require Marking table.
+      // Daily marking-submission buckets + 7-day total, from the New LMS.
       const evToday = toNumber(item.today);
       const evYesterday = toNumber(item.yesterday);
       const evMinus2 = toNumber(item.ev_minus_2);
@@ -285,6 +307,7 @@ export const fetchCoachesLateness = async (source?: LearnerSource): Promise<Coac
         totalLearners,
         recentSubmitters,
         learnerEngagement,
+        attendanceRate: item.attendance_rate == null ? null : toNumber(item.attendance_rate),
         otjhOnTrack,
         otjhNormal: toNumber(item.otjh_normal_0_20_field),
         otjhNeedAttention: toNumber(item.otjh_need_attention_20_40_field),
@@ -292,14 +315,14 @@ export const fetchCoachesLateness = async (source?: LearnerSource): Promise<Coac
         otjhVarOnTrack: toNumber(item.otjh_var_ontrack),
         otjhVarNeedAttention: toNumber(item.otjh_var_need_attention),
         otjhVarAtRisk: toNumber(item.otjh_var_at_risk),
-        // Marking Weekly needs a prior-week pending snapshot the live sources
-        // don't carry, so lastWeekPending mirrors pending (0% week-over-week).
-        lastWeekPending: pending,
+        // No historical queue snapshot is supplied by this endpoint.
+        lastWeekPending: null,
         pending,
-        markingProgressWeekly: 0,
+        markingProgressWeekly: null,
         evidenceAccepted: toNumber(item.evidence_accepted),
         evidenceReferred,
         referredClosure,
+        referredClosureAvailable: item.referred_closure_available !== false,
         referredClosurePct,
         totalEvidence,
         // Daily evidence buckets (from Require Marking).
@@ -333,6 +356,9 @@ export const fetchCoachesLateness = async (source?: LearnerSource): Promise<Coac
         prOverallCompleted,
         prOverallBehind: Math.max(prOverallRequired - prOverallCompleted, 0),
         prOverallCompletionRate,
+        prLmsRate: item.lms_pr_rate === null || item.lms_pr_rate === undefined
+          ? null
+          : toNumber(item.lms_pr_rate),
         prRequired12Weeks,
         prCompleted12Weeks,
         prCompletionRate12Weeks: prOverallCompletionRate,

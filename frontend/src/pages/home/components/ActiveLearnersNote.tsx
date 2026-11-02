@@ -1,5 +1,4 @@
-// Explains which learners the dashboard counts, so its figures can be read
-// against other reports (e.g. the LMS's own coach page, which counts more).
+// Matches the LMS All Learners population and pending-marking queue.
 export default function ActiveLearnersNote() {
   return (
     <div
@@ -13,11 +12,11 @@ export default function ActiveLearnersNote() {
     >
       <i className="ri-information-line" style={{ fontSize: 16, color: "var(--color-accent)", flexShrink: 0 }} aria-hidden="true" />
       <span>
-        <strong style={{ color: "var(--color-text-primary)" }}>Active learners only.</strong>{" "}
-        All figures (learners, engagement, OTJH, PR, MCM, pending) count learners who are{" "}
-        <strong>Active</strong> on Aptem, or <strong>Active / Delivery</strong> on the LMS.
-        Not counted: on break, onboarding, ready to enrol, entered EPA, withdrawn, completed,
-        and test / staff accounts.
+        <strong style={{ color: "var(--color-text-primary)" }}>LMS coach caseload.</strong>{" "}
+        Total Learners follows the LMS coach caseload and includes only learners with
+        programme status Active or Delivery. Learners on break, onboarding, withdrawn,
+        completed and EPA stages are excluded.
+        Pending Marking counts submissions awaiting tutor review or escalated in the LMS.
       </span>
     </div>
   );

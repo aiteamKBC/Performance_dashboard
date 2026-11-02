@@ -31,7 +31,7 @@ interface Agg {
   name: string;
   totalLearners: number; recentSubmitters: number;
   evidenceReferred: number; referredClosure: number;
-  lastWeekPending: number; pending: number;
+  lastWeekPending: number | null; pending: number;
   prRequired4Weeks: number; prCompleted4Weeks: number; prDoneOld4Weeks: number;
   prOverallRequired: number; prOverallCompleted: number;
   otjhOnTrack: number; otjhNormal: number; otjhNeedAttention: number; otjhAtRisk: number;
@@ -53,7 +53,7 @@ function aggregate(records: CoachRecord[]): Agg[] {
     a.recentSubmitters   += r.recentSubmitters;
     a.evidenceReferred   += r.evidenceReferred;
     a.referredClosure    += r.referredClosure;
-    a.lastWeekPending    += r.lastWeekPending;
+    a.lastWeekPending = a.lastWeekPending == null || r.lastWeekPending == null ? null : a.lastWeekPending + r.lastWeekPending;
     a.pending            += r.pending;
     a.prRequired4Weeks   += r.prRequired4Weeks;
     a.prCompleted4Weeks  += r.prCompleted4Weeks;
@@ -127,10 +127,11 @@ export const CHART_DEFS: ChartDef[] = [
   {
     id: "marking",
     title: "Marking Progress Weekly",
-    subtitle: "Week-over-week change (%)",
+    subtitle: "Prior-week history unavailable",
     icon: "ri-edit-2-line",
     color: "#fbbf24",
     buildData: (agg) => agg.map((r) => {
+      if (r.lastWeekPending == null) return { name: r.name, Marking: null };
       const raw = r.lastWeekPending > 0 ? ((r.lastWeekPending - r.pending) / r.lastWeekPending) * 100 : (r.pending > 0 ? -100 : 0);
       return { name: r.name, Marking: Math.round(clamp(raw, -100, 100) * 10) / 10 };
     }),
@@ -220,8 +221,8 @@ export const CHART_DEFS: ChartDef[] = [
   },
   {
     id: "assignment",
-    title: "Assignment — Last & Current Week",
-    subtitle: "Last week pending vs current pending",
+    title: "Pending Marking",
+    subtitle: "Current LMS queue; prior-week history unavailable",
     icon: "ri-hourglass-2-line",
     color: "#7c4daa",
     buildData: (agg) => agg.map((r) => ({ name: r.name, "Last Week": r.lastWeekPending, Pending: r.pending })),

@@ -81,7 +81,11 @@ export const fetchAttendanceWeeks = async (
   const params = new URLSearchParams({ count: String(count) });
   if (page?.before) params.set('before', page.before);
   else if (page?.after) params.set('after', page.after);
-  const response = await fetch(buildApiUrl(`/api/attendance-weeks/?${params.toString()}`));
+  // Attendance is computed from live LMS data; never let the browser reuse a
+  // previous GET response after the source data has been refreshed.
+  const response = await fetch(buildApiUrl(`/api/attendance-weeks/?${params.toString()}`), {
+    cache: 'no-store',
+  });
   if (!response.ok) {
     throw new Error(`Error: ${response.status} ${response.statusText}`);
   }
