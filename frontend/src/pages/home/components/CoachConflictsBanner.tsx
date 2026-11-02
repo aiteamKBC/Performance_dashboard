@@ -5,7 +5,7 @@ function initials(name: string) {
 }
 
 // One system's coach (or status) for the learner. ``counted`` marks the side
-// the dashboard's numbers follow (Aptem); ``current`` the coach being viewed.
+// the dashboard's numbers follow (the LMS); ``current`` the coach being viewed.
 function CoachChip({ system, coach, current, counted, counts = "Counted" }: {
   system: string; coach: string; current: boolean; counted?: boolean; counts?: string;
 }) {
@@ -84,15 +84,16 @@ export function CoachConflictList({ coachName, conflicts }: { coachName: string;
           <div style={{ display: "flex", alignItems: "center", gap: "var(--space-2)", flex: "1 1 280px", minWidth: 0 }}>
             {c.kind === "status" ? (
               <>
-                <CoachChip system="Aptem" coach={c.aptem_status ?? ""} current={false} counted counts="Not counted" />
+                <CoachChip system="Aptem" coach={c.aptem_status ?? ""} current={false} />
                 <i className="ri-arrow-left-right-line" style={{ color: "var(--color-text-faint)", flexShrink: 0 }} aria-label="differs from" />
-                <CoachChip system="LMS" coach={c.lms_status ?? ""} current={false} />
+                <CoachChip system="LMS" coach={c.lms_status ?? ""} current={false} counted
+                  counts={c.counted === false ? "Not counted" : "Counted"} />
               </>
             ) : (
               <>
-                <CoachChip system="Aptem" coach={c.aptem_coach} current={c.aptem_coach === coachName} counted />
+                <CoachChip system="Aptem" coach={c.aptem_coach} current={c.aptem_coach === coachName} />
                 <i className="ri-arrow-left-right-line" style={{ color: "var(--color-text-faint)", flexShrink: 0 }} aria-label="differs from" />
-                <CoachChip system="LMS" coach={c.lms_coach} current={c.lms_coach === coachName} />
+                <CoachChip system="LMS" coach={c.lms_coach} current={c.lms_coach === coachName} counted />
               </>
             )}
           </div>
@@ -104,16 +105,15 @@ export function CoachConflictList({ coachName, conflicts }: { coachName: string;
 
 // How the dashboard treats each conflict kind (banner + modal footer).
 export const CONFLICTS_NOTE =
-  "Coach conflicts are counted under the Aptem coach; learners Active only on the LMS aren't counted. Update Aptem or the LMS so both systems agree.";
+  "The dashboard follows the LMS: coach conflicts are counted under the LMS coach, learners Active only on the LMS are counted, and learners Active only on Aptem are not. Update Aptem or the LMS so both systems agree.";
 
 interface CoachConflictsBannerProps {
   coachName: string;
   conflicts: CoachConflict[];
 }
 
-// Coach-page banner: the coach's Aptem / LMS conflicts. Coach conflicts are
-// counted under the Aptem coach and status conflicts aren't counted, until one
-// of the two systems is corrected.
+// Coach-page banner: the coach's Aptem / LMS conflicts. Both kinds follow the
+// LMS (its coach, its status) until one of the two systems is corrected.
 export default function CoachConflictsBanner({ coachName, conflicts }: CoachConflictsBannerProps) {
   if (conflicts.length === 0) return null;
 

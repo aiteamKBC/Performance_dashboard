@@ -53,7 +53,10 @@ export default function CoachCards({ records, onSelect, title = "Coaches" }: Coa
         gap: "var(--space-3)",
       }}>
         {records.map((r) => {
-          const prRate = r.prOverallCompletionRate;
+          // `null` is meaningful here: the LMS shows no PR rate when there
+          // were no reviews due in the window.  Undefined keeps compatibility
+          // with older mock records that only carry the legacy field.
+          const prRate = r.prLmsRate === undefined ? r.prOverallCompletionRate : r.prLmsRate;
           // OTJH counts use the variance-based bands (same as the Metric
           // Breakdown table & coach-page chart); fall back to the source bands.
           const otjhOnTrack = r.otjhVarOnTrack ?? r.otjhOnTrack;
@@ -96,7 +99,7 @@ export default function CoachCards({ records, onSelect, title = "Coaches" }: Coa
                 </div>
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <p style={{ margin: 0, fontSize: "var(--text-sm)", fontWeight: "var(--font-semibold)", color: "var(--color-text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.coach}</p>
-                  <p style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>{r.totalLearners} active learners</p>
+                  <p style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>{r.totalLearners} learners</p>
                   {(r.coachConflicts?.length ?? 0) > 0 && (
                     <span
                       // A span, not a button: the whole card is already a button.
@@ -121,12 +124,20 @@ export default function CoachCards({ records, onSelect, title = "Coaches" }: Coa
 
               {/* Metrics grid */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "var(--space-2) var(--space-3)" }}>
-                <Stat label="Active Learners" value={r.totalLearners} />
+                <Stat label="Total Learners" value={r.totalLearners} />
                 <Stat label="Engagement" value={`${r.learnerEngagement}%`} color={tone(r.learnerEngagement, 85, 70)} />
-                <Stat label="PR Rate" value={`${prRate}%`} color={tone(prRate, 90, 70)} />
+                <Stat
+                  label="PR Rate"
+                  value={prRate == null ? "—" : `${prRate}%`}
+                  color={prRate == null ? "var(--color-text-muted)" : tone(prRate, 90, 70)}
+                />
                 <Stat label="OTJH Risk" value={otjhAtRisk} color={tone(otjhAtRisk, 4, 7, true)} />
                 <Stat label="Pending" value={r.pending} color={tone(r.pending, 12, 20, true)} />
-                <Stat label="Ref Closure" value={r.referredClosure} />
+                <Stat
+                  label="Attendance"
+                  value={r.attendanceRate == null ? "—" : `${r.attendanceRate}%`}
+                  color={r.attendanceRate == null ? "var(--color-text-muted)" : tone(r.attendanceRate, 85, 70)}
+                />
               </div>
 
               {/* OTJH mini-bar */}

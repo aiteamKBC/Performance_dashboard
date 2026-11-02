@@ -14,12 +14,45 @@ from pathlib import Path
 
 import os
 import dj_database_url
-from dotenv import load_dotenv
-
-load_dotenv()
+from dotenv import dotenv_values
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Read the backend environment file by absolute path. Do not load it wholesale:
+# Windows environment names are case-insensitive, so the legacy ``Database_url``
+# would otherwise be mistaken for the distinct ``DATABASE_URL`` setting.
+_file_env = {str(k): v for k, v in dotenv_values(BASE_DIR / '.env').items() if v is not None}
+_runtime_env = dict(os.environ)
+
+
+def _exact(mapping, name):
+    return next((value for key, value in mapping.items() if key == name), None)
+
+
+def _configured(name, legacy_name=None):
+    return (
+        _exact(_runtime_env, name)
+        or _exact(_file_env, name)
+        or (_exact(_runtime_env, legacy_name) if legacy_name else None)
+        or (_exact(_file_env, legacy_name) if legacy_name else None)
+    )
+
+# Support the legacy names used by the local deployment while keeping the
+# explicit modern names authoritative. These are separate Neon databases:
+# Aptem/reporting tables are the Django default, LMS tables are read directly,
+# and attendance uses the KBC database.
+_aptem_database_url = _configured('APTEMAUTOEXTRACTINGDATABASE')
+_lms_database_url = _configured('LMS_DATABASE_URL', 'Database_url')
+_kbc_database_url = _configured('kbc_main_database_url', 'KBCDATABASE')
+_database_url = _configured('DATABASE_URL') or _aptem_database_url or _lms_database_url or _kbc_database_url
+
+if _database_url:
+    os.environ['DATABASE_URL'] = _database_url
+if _lms_database_url:
+    os.environ['LMS_DATABASE_URL'] = _lms_database_url
+if _kbc_database_url:
+    os.environ['kbc_main_database_url'] = _kbc_database_url
 
 
 # Quick-start development settings - unsuitable for production
@@ -93,9 +126,13 @@ DATABASES = {
     'default': dj_database_url.config(
         default=os.environ.get('DATABASE_URL'),
         conn_max_age=600,
-        ssl_require=True
+        ssl_require=True,
+        conn_health_checks=True,
     )
 }
+DATABASES['default'].setdefault('OPTIONS', {}).update({
+    'connect_timeout': 15,
+})
 
 
 # Password validation

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DrillLearnerRow, ReviewRow } from "@/services/coachesLateness";
 import { downloadXlsx, type Cell } from "@/utils/xlsx";
-import { otjhStatusFromVariance, parseProgressHours } from "@/utils/otjh";
+import { parseProgressHours } from "@/utils/otjh";
+import { toLearnerView } from "@/utils/learners";
 
 const STATUS_COLOR: Record<string, string> = {
   "On Track": "#16A34A",
@@ -153,15 +154,15 @@ function buildRows(learners: DrillLearnerRow[], reviewRows: ReviewRow[]): Metric
     if (l.otjh_status) {
       // Target, Progress-Hours and ProgressVariance all come straight from
       // their source columns rather than being derived.
-      const tgtHours = parseProgressHours(l.otjh_target);
+      const view = toLearnerView(l);
+      const tgtHours = view.targetHours;
       // Numeric form of the source variance, for status banding.
-      const variance = parseProgressHours(l.otjh_progress_variance);
       out.push({
         ...base, metric: "OTJH", metricKey: "OTJH",
-        status: otjhStatusFromVariance(variance, l.otjh_status), date: "",
-        completed: l.completed,
+        status: view.otjhBand, date: "",
+        completed: l.completed ?? undefined,
         target: l.otjh_target || "",
-        targetHours: tgtHours == null ? undefined : Math.round(tgtHours * 10) / 10,
+        targetHours: tgtHours ?? undefined,
         progressHours: l.otjh_progress_hours,
         progressVariance: l.otjh_progress_variance || "",
       });
@@ -205,17 +206,25 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
   const [status, setStatus] = useState("ALL");
   const [period, setPeriod] = useState("ALL");
   const [search, setSearch] = useState("");   // free-text learner name/email filter
+  const [dateFilter, setDateFilter] = useState(""); // exact meeting/review date
   // Column sort — null means natural (unsorted) order.
   const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
 
   // Follow the metric chosen by a KPI card click on the parent page, clearing
   // any status/period that belonged to the previous metric.
-  useEffect(() => { setMetric(initialMetric); setStatus("ALL"); setPeriod("ALL"); setSort(null); }, [initialMetric]);
+  useEffect(() => {
+    setMetric(initialMetric);
+    setStatus("ALL");
+    setPeriod("ALL");
+    setDateFilter("");
+    setSort(null);
+  }, [initialMetric]);
 
   const changeMetric = (value: string) => {
     setMetric(value);
     setStatus("ALL");
     setPeriod("ALL");
+    setDateFilter("");
     setSort(null);   // columns differ between OTJH and the other metrics
   };
 
@@ -243,6 +252,7 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
       if (statusMode && status !== "ALL" && r.status !== status) return false;
       // Time period only constrains dated PR/MCM rows.
       if (reviewMode && periodMonths != null && !withinPeriod(r.date, today, periodMonths)) return false;
+      if (dateFilter && r.date !== dateFilter) return false;
       // Free-text search matches the learner name or email.
       if (query && !`${r.name} ${r.email}`.toLowerCase().includes(query)) return false;
       return true;
@@ -261,7 +271,7 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
         : String(av).localeCompare(String(bv));
       return sort.dir === "asc" ? diff : -diff;
     });
-  }, [allRows, metric, programme, status, period, search, statusMode, reviewMode, today, sort]);
+  }, [allRows, metric, programme, status, period, dateFilter, search, statusMode, reviewMode, today, sort]);
 
   const tableRef = useRef<HTMLTableElement>(null);
   const [exporting, setExporting] = useState(false);
@@ -304,6 +314,7 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
         programme !== "ALL" ? `Programme: ${programme}` : null,
         statusMode && status !== "ALL" ? `Status: ${status}` : null,
         reviewMode && period !== "ALL" ? `Period: ${PERIODS.find((p) => p.key === period)?.label}` : null,
+        dateFilter ? `Date: ${dateFilter}` : null,
         search.trim() ? `Search: "${search.trim()}"` : null,
       ].filter(Boolean);
       const subtitle = `${rows.length} row${rows.length === 1 ? "" : "s"} · ${filterBits.join(" · ")} · Exported ${new Date().toLocaleString()}`;
@@ -463,6 +474,18 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
                 </button>
               )}
             </div>
+          </label>
+
+          <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
+            Date
+            <input
+              type="date"
+              value={dateFilter}
+              onChange={(e) => setDateFilter(e.target.value)}
+              aria-label="Filter by meeting or review date"
+              title="Filter by meeting or review date"
+              style={{ ...selectStyle, minWidth: 140, cursor: "pointer" }}
+            />
           </label>
 
           <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>

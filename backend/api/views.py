@@ -1,15 +1,82 @@
+import logging
+import threading
+import time
+
 from django.shortcuts import render
-from django.db import connection
+from django.db import connection, connections
 from rest_framework import viewsets
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from .models import CoachesLateness, CoachSummary
 from .serializers import CoachesLatenessSerializer, CoachSummarySerializer
-from .lateness_compute import SOURCES, compute_coaches_lateness, compute_coach_drill
+from .lateness_compute import SOURCES, clear_fetch_cache, compute_coaches_lateness, compute_coach_drill
 from .attendance_compute import get_attendance_weeks, get_attendance_drill
+from .lms_source import LmsDataUnavailable, clear_lms_cache
 from .action_plan import (
     create_action_plan, list_action_plans, delete_action_plan, get_action_plan_file,
 )
+
+log = logging.getLogger(__name__)
+
+
+# The coaches endpoint aggregates several large source tables. Keep the
+# computed response briefly so refreshes and multiple browser tabs do not all
+# repeat the same expensive work. The LMS source already has its own shorter
+# cache; this cache covers the complete response returned to the dashboard.
+COACHES_LATENESS_CACHE_SECONDS = 60
+_coaches_lateness_cache = {}
+_coaches_lateness_cache_lock = threading.Lock()
+
+
+def _get_cached_coaches_lateness(source):
+    cache_key = source or "all"
+    cached = _coaches_lateness_cache.get(cache_key)
+    if cached:
+        # Never make a page wait for a recompute once there is a result: serve
+        # it and refresh in the background when it is out of date.
+        if time.monotonic() - cached[0] >= COACHES_LATENESS_CACHE_SECONDS:
+            _recompute_in_background(source)
+        return cached[1]
+
+    # Hold the lock while computing so simultaneous page loads collapse into a
+    # single database calculation instead of creating a request stampede.
+    with _coaches_lateness_cache_lock:
+        cached = _coaches_lateness_cache.get(cache_key)
+        if cached:
+            return cached[1]
+        result = compute_coaches_lateness(source=source)
+        _coaches_lateness_cache[cache_key] = (time.monotonic(), result)
+        return result
+
+
+def _recompute_in_background(source):
+    if not _coaches_lateness_cache_lock.acquire(blocking=False):
+        return  # a computation is already running
+
+    def run():
+        try:
+            result = compute_coaches_lateness(source=source)
+            _coaches_lateness_cache[source or "all"] = (time.monotonic(), result)
+        except Exception:
+            log.exception("Background refresh of the coaches dashboard failed.")
+        finally:
+            _coaches_lateness_cache_lock.release()
+            connections.close_all()
+
+    threading.Thread(target=run, name="coaches-cache-refresh", daemon=True).start()
+
+
+def warm_caches():
+    """Compute the coaches dashboard in the background at server start, so the
+    first visitor does not wait for the LMS and Aptem reads."""
+    _recompute_in_background(None)
+
+
+def _clear_coaches_lateness_cache():
+    with _coaches_lateness_cache_lock:
+        _coaches_lateness_cache.clear()
+    clear_lms_cache()
+    clear_fetch_cache()
 
 class CoachesLatenessViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = CoachesLateness.objects.all()
@@ -23,7 +90,12 @@ class CoachesLatenessViewSet(viewsets.ReadOnlyModelViewSet):
         source = request.query_params.get("source")
         if source not in SOURCES:
             source = None
-        return Response(compute_coaches_lateness(source=source))
+        try:
+            if request.query_params.get("refresh") in {"1", "true", "yes"}:
+                _clear_coaches_lateness_cache()
+            return Response(_get_cached_coaches_lateness(source))
+        except LmsDataUnavailable as exc:
+            return Response({"detail": str(exc)}, status=503)
 
 
 class CoachDrillView(APIView):
@@ -39,9 +111,12 @@ class CoachDrillView(APIView):
         source = request.query_params.get("source")
         if source not in SOURCES:
             source = None
-        return Response(compute_coach_drill(
-            coach_name=coach_name, case_owner_id=case_owner_id, source=source,
-        ))
+        try:
+            return Response(compute_coach_drill(
+                coach_name=coach_name, case_owner_id=case_owner_id, source=source,
+            ))
+        except LmsDataUnavailable as exc:
+            return Response({"detail": str(exc)}, status=503)
 
 class ActionPlanView(APIView):
     """Coach action plans (title + notes), stored in the KBC database.
@@ -137,7 +212,10 @@ class AttendanceWeeksView(APIView):
         count = max(1, min(count, 52))
         before = request.query_params.get("before") or None
         after = request.query_params.get("after") or None
-        return Response(get_attendance_weeks(count=count, before=before, after=after))
+        response = Response(get_attendance_weeks(count=count, before=before, after=after))
+        response["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response["Pragma"] = "no-cache"
+        return response
 
 
 class AttendanceDrillView(APIView):

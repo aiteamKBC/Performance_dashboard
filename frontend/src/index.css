@@ -30,6 +30,11 @@
   --color-accent-tint:    #EEF1FD;
   --color-accent-light:   #C7D2FC;
 
+  /* COACH PAGE LEARNER TABLE — the LMS tutor dashboard's purple */
+  --color-lms-purple:       #4C2A85;
+  --color-lms-purple-tint:  #F3EEFB;
+  --color-lms-purple-light: #D9CCF2;
+
   /* SIDEBAR */
   --sidebar-bg-from:      #0F1629;
   --sidebar-bg-to:        #1A2545;

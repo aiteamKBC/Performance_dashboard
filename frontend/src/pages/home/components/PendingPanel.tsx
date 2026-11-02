@@ -6,8 +6,8 @@ interface PendingPanelProps {
 
 export default function PendingPanel({ records }: PendingPanelProps) {
   const totalPending = records.reduce((s, r) => s + r.pending, 0);
-  const totalLastWeek = records.reduce((s, r) => s + r.lastWeekPending, 0);
-  const totalMarking = records.reduce((s, r) => s + r.markingProgressWeekly, 0);
+  const totalLastWeek = records.some((r) => r.lastWeekPending == null) ? null : records.reduce((s, r) => s + (r.lastWeekPending ?? 0), 0);
+  const totalMarking = records.some((r) => r.markingProgressWeekly == null) ? null : records.reduce((s, r) => s + (r.markingProgressWeekly ?? 0), 0);
 
   const maxPending = Math.max(...records.map((r) => r.pending), 1);
 
@@ -46,7 +46,7 @@ export default function PendingPanel({ records }: PendingPanelProps) {
             <div style={{ display: "flex", justifyContent: "center", marginBottom: "var(--space-2)" }}>
               <i className={`${t.icon}`} style={{ color: t.color, fontSize: 20 }} />
             </div>
-            <div style={{ fontSize: "var(--text-xl)", fontWeight: "var(--font-bold)", color: "var(--color-text-primary)", fontVariantNumeric: "tabular-nums" }}>{t.value}</div>
+            <div style={{ fontSize: "var(--text-xl)", fontWeight: "var(--font-bold)", color: "var(--color-text-primary)", fontVariantNumeric: "tabular-nums" }}>{t.value ?? "—"}</div>
             <div style={{ fontSize: "var(--text-xs)", color: "var(--color-text-muted)", marginTop: 2 }}>{t.label}</div>
           </div>
         ))}
@@ -61,16 +61,16 @@ export default function PendingPanel({ records }: PendingPanelProps) {
             </div>
             <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 3 }}>
               <div style={{ display: "flex", alignItems: "center", gap: "var(--space-1)" }}>
-                <div style={{ height: 6, borderRadius: 3, background: "var(--color-accent)", width: `${(r.lastWeekPending / maxPending) * 100}%`, minWidth: 4 }} />
-                <span style={{ fontSize: 10, color: "var(--color-text-muted)", fontVariantNumeric: "tabular-nums" }}>{r.lastWeekPending}</span>
+                <div style={{ height: 6, borderRadius: 3, background: "var(--color-accent)", width: `${((r.lastWeekPending ?? 0) / maxPending) * 100}%` }} />
+                <span style={{ fontSize: 10, color: "var(--color-text-muted)", fontVariantNumeric: "tabular-nums" }}>{r.lastWeekPending ?? "—"}</span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "var(--space-1)" }}>
                 <div style={{ height: 6, borderRadius: 3, background: "var(--color-danger)", width: `${(r.pending / maxPending) * 100}%`, minWidth: 4 }} />
                 <span style={{ fontSize: 10, color: "var(--color-text-muted)", fontVariantNumeric: "tabular-nums" }}>{r.pending}</span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: "var(--space-1)" }}>
-                <div style={{ height: 6, borderRadius: 3, background: "var(--color-success)", width: `${(r.markingProgressWeekly / maxPending) * 100}%`, minWidth: 4 }} />
-                <span style={{ fontSize: 10, color: "var(--color-text-muted)", fontVariantNumeric: "tabular-nums" }}>{r.markingProgressWeekly}</span>
+                <div style={{ height: 6, borderRadius: 3, background: "var(--color-success)", width: `${((r.markingProgressWeekly ?? 0) / maxPending) * 100}%` }} />
+                <span style={{ fontSize: 10, color: "var(--color-text-muted)", fontVariantNumeric: "tabular-nums" }}>{r.markingProgressWeekly ?? "—"}</span>
               </div>
             </div>
           </div>

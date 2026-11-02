@@ -38,7 +38,7 @@ interface CaseOwnerAggregate {
   evidenceAccepted: number;
   evidenceReferred: number;
   referredClosure: number;
-  lastWeekPending: number;
+  lastWeekPending: number | null;
   pending: number;
   prRequired4Weeks: number;
   prCompleted4Weeks: number;
@@ -147,7 +147,7 @@ function aggregateByCaseOwner(records: CoachRecord[]): CaseOwnerAggregate[] {
     current.evidenceAccepted += r.evidenceAccepted;
     current.evidenceReferred += r.evidenceReferred;
     current.referredClosure += r.referredClosure;
-    current.lastWeekPending += r.lastWeekPending;
+    current.lastWeekPending = current.lastWeekPending == null || r.lastWeekPending == null ? null : current.lastWeekPending + r.lastWeekPending;
     current.pending += r.pending;
     current.prRequired4Weeks += r.prRequired4Weeks;
     current.prCompleted4Weeks += r.prCompleted4Weeks;
@@ -279,8 +279,8 @@ export default function ChartsSection({ records }: ChartsSectionProps) {
         </ChartCard>
 
         <ChartCard
-          title="Pending workload: last week vs current"
-          subtitle="Count of pending assignments"
+          title="Pending marking"
+          subtitle="Current LMS queue · prior-week history unavailable"
         >
           <ResponsiveContainer width="100%" height={160}>
             <BarChart data={assignmentData} margin={{ top: 4, right: 8, left: -20, bottom: 36 }}>

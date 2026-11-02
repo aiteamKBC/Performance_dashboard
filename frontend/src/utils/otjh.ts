@@ -44,9 +44,18 @@ export function otjhBand(raw: string): string {
   return raw || "—";
 }
 
-// OTJH band from the progress variance %: 0 to −5% On Track, −5% to −15% Need
-// Attention, worse than −15% At Risk. Falls back to the source status band when
-// variance can't be computed.
+// OTJH RAG band from the hour deficit. The LMS rule is based on hours, not the
+// percentage variance: >40h At Risk, >20h Need Attention, otherwise On Track.
+export function otjhStatusFromHours(completed: number, target: number | null, fallbackRaw: string): string {
+  if (target == null || !Number.isFinite(target)) return otjhBand(fallbackRaw);
+  const deficit = Math.max(target - completed, 0);
+  if (deficit > 40) return "At Risk";
+  if (deficit > 20) return "Need Attention";
+  return "On Track";
+}
+
+// Legacy percentage-based helper retained for callers that only have a
+// variance value. New learner-level OTJH views should use otjhStatusFromHours.
 export function otjhStatusFromVariance(variance: number | null, fallbackRaw: string): string {
   if (variance == null) return otjhBand(fallbackRaw);
   if (variance >= -5) return "On Track";
