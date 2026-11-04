@@ -131,7 +131,8 @@ def _otjh_facts(cur, lms_ids):
     cur.execute(
         '''SELECT DISTINCT ON ((l->>'id')::bigint) (l->>'id')::bigint,
                   (l->>'otjhActual')::numeric, (l->>'otjhPlanned')::numeric,
-                  (l->>'otjhTargetAsOfToday')::numeric
+                  (l->>'otjhTargetAsOfToday')::numeric,
+                  l->>'otjhRagStatus'
              FROM "Coach".coach_dashboard_snapshot s
              CROSS JOIN LATERAL jsonb_array_elements(coalesce(s.payload->'learners', '[]'::jsonb)) l
             WHERE l->>'id' ~ '^[0-9]+$' AND (l->>'id')::bigint = ANY(%s)
@@ -150,7 +151,7 @@ def _otjh_facts(cur, lms_ids):
 
     out = {}
     for i in ids:
-        s_actual, s_planned, s_target = snap.get(i, (None, None, None))
+        s_actual, s_planned, s_target, s_rag = snap.get(i, (None, None, None, None))
         v_planned, v_target, v_actual = view.get(i, (None, None, None))
         from_lms = s_target is not None
         actual = _num(s_actual) if s_actual is not None else _num(v_actual)
@@ -160,6 +161,13 @@ def _otjh_facts(cur, lms_ids):
             actual = 0.0
         shortfall = round(max(target - actual, 0.0), 2) if target is not None else None
         delta = actual - target if target is not None else None
+        normalized_rag = _clean(s_rag).lower().replace('_', '-').replace(' ', '-')
+        snapshot_status = {
+            'on-track': 'On Track',
+            'need-attention': 'Need Attention',
+            'at-risk': 'At Risk',
+            'unavailable': 'Unavailable',
+        }.get(normalized_rag)
         out[i] = {
             "completed": actual, "planned": planned, "target": target,
             "progress_hours": round(delta, 2) if delta is not None else None,
@@ -167,8 +175,11 @@ def _otjh_facts(cur, lms_ids):
             "progress_percent": round(max(0.0, min(100.0, actual / target * 100)), 2)
             if delta is not None and target > 0 else None,
             "shortfall_hours": shortfall,
-            "otjh_status": ("Unavailable" if shortfall is None else "At Risk" if shortfall > 40
-                            else "Need Attention" if shortfall > 20 else "On Track"),
+            # The snapshot's RAG is the LMS coach-dashboard classification.
+            # Only derive it from hours when the snapshot does not provide one.
+            "otjh_status": (snapshot_status or
+                            ("Unavailable" if shortfall is None else "At Risk" if shortfall > 40
+                             else "Need Attention" if shortfall > 20 else "On Track")),
             "as_of": today.isoformat(),
             "source": ("lms:canonical-programme-plan-window" if from_lms
                        else "lms:learner_target_hours_current" if target is not None else "unavailable"),

@@ -60,13 +60,14 @@ class CaseloadTests(unittest.TestCase):
         self.assertEqual([row['id'] for row in visible], [1])
         self.assertEqual(queue, [])
 
-    def test_lifecycle_must_also_be_active_or_delivery(self):
+    def test_lms_programme_status_is_authoritative_for_visibility(self):
         profiles = [self.learner(1, lifecycle_status='active'),
                     self.learner(2, 'Delivery', lifecycle_status='enteredepa'),
-                    self.learner(3, lifecycle_status='withdrawn'),
-                    self.learner(4, lifecycle_status='readytoenrol')]
+                    self.learner(3, 'On Break', lifecycle_status='active'),
+                    self.learner(4, 'Ready to Enrol', lifecycle_status='active'),
+                    self.learner(5, lifecycle_status='readytoenrol')]
         visible, _ = build_caseload(profiles, {})
-        self.assertEqual([row['id'] for row in visible], [1])
+        self.assertEqual([row['id'] for row in visible], [1, 2, 5])
 
     def test_named_test_learners_and_staff_accounts_are_excluded(self):
         profiles = [
@@ -75,9 +76,10 @@ class CaseloadTests(unittest.TestCase):
             {**self.learner(3), 'full_name': 'ME L4 Oct 26 (Test)'},
             {**self.learner(4), 'full_name': 'Khaled first learning session'},
             {**self.learner(5), 'email': 'someone@kentbusinesscollege.com'},
+            {**self.learner(6), 'email': 'prakhar.singhal@kentbusinesscollege.com'},
         ]
         visible, _ = build_caseload(profiles, {})
-        self.assertEqual([row['id'] for row in visible], [1])
+        self.assertEqual([row['id'] for row in visible], [1, 6])
 
     def test_learner_without_lms_coach_falls_back_to_known_coach(self):
         profiles = [self.learner(1), {**self.learner(2), 'coach_email': None, 'coach_name': None}]

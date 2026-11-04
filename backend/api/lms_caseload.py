@@ -11,6 +11,13 @@ _STAFF_DOMAINS = (
     '@kentbusinesscollege.com', '@kentbusinesscollege.org', '@kentbusinesscollege.net',
 )
 
+# LMS learner profiles that use an internal KBC email but are genuine learners
+# on a coach's caseload. Keep this explicit rather than disabling the staff
+# account guard for the whole domain.
+_INTERNAL_LEARNER_EMAILS = {
+    'prakhar.singhal@kentbusinesscollege.com',
+}
+
 
 def excluded_account(row):
     """Synthetic/test accounts that must not enter dashboard caseloads."""
@@ -31,7 +38,7 @@ def excluded_account(row):
     if re.search(r'\btest\b', name) or re.search(r'first (learning )?session', name):
         return True
     # Staff enrolled as learners (KBC staff email as the learner's own email).
-    if email.endswith(_STAFF_DOMAINS):
+    if email.endswith(_STAFF_DOMAINS) and email not in _INTERNAL_LEARNER_EMAILS:
         return True
     # QA accounts can be named in several ways (e.g. "KBC Android QA" or
     # "QA learner-launch"); treat QA as a synthetic account marker.
@@ -48,12 +55,13 @@ def visible_status(status):
 
 
 def visible_learner(row):
-    """Active / Delivery on the programme *and* in the learner's lifecycle.
-    The programme status lags behind lifecycle moves (withdrawn, entered EPA,
-    on break, onboarding, ready to enrol), so both have to agree."""
-    lifecycle = row.get('lifecycle_status')
-    return visible_status(row.get('programme_status')) and (
-        not str(lifecycle or '').strip() or visible_status(lifecycle))
+    """Use the LMS programme status as the authoritative caseload status.
+
+    ``lifecycle_status`` is an internal lifecycle signal and can lag or differ
+    from the Active / Delivery status shown by the LMS coach caseload. The
+    dashboard population follows that LMS-facing programme status.
+    """
+    return visible_status(row.get('programme_status'))
 
 
 def build_caseload(profiles, marking, fallback_owner=None):
