@@ -1,12 +1,12 @@
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, LineChart, Line, ReferenceLine,
+  ResponsiveContainer, Line, ReferenceLine, ComposedChart,
+  Cell, LabelList,
 } from "recharts";
 import { useState } from "react";
 import { CoachSummaryRecord } from "@/mocks/coachSummary";
 
 const COMPANY_COLOR = "var(--coach-summary-chart-company)";
-const ACCENT = "var(--coach-summary-chart-accent)";
 
 const tooltipStyle = {
   backgroundColor: "#ffffff",
@@ -21,88 +21,49 @@ const tooltipItemStyle = { color: "#6B7280" };
 const cursorStyle = { fill: "#EEF2FF" };
 const axisStyle = { fontSize: 10, fill: "#9CA3AF" };
 
-const COACH_COLORS = [
-  "var(--coach-summary-series-1)",
-  "var(--coach-summary-series-2)",
-  "var(--coach-summary-series-3)",
-  "var(--coach-summary-series-4)",
-  "var(--coach-summary-series-5)",
-  "var(--coach-summary-series-6)",
-  "var(--coach-summary-series-7)",
-  "var(--coach-summary-series-8)",
-  "var(--coach-summary-series-9)",
-  "var(--coach-summary-series-10)",
-  "var(--coach-summary-series-11)",
-];
-
 export default function CoachSummaryCharts({ records }: { records: CoachSummaryRecord[] }) {
   const coaches = records.filter(r => r.coachName !== "OVERALL COMPANY");
   const overall = records.find(r => r.coachName === "OVERALL COMPANY");
-
-  const [selectedSeries, setSelectedSeries] = useState("all");
-
-  const coachLineMeta = coaches.map((c, i) => {
-    const words = c.coachName.split(" ");
-    const shortLabel = `${words[0]} ${words[1]?.[0] ?? ""}`.trim();
-    return {
-      key: `coach_${i}`,
-      shortLabel,
-      color: COACH_COLORS[i % COACH_COLORS.length],
-      coach: c,
-    };
-  });
+  const [selectedCoach, setSelectedCoach] = useState("all");
 
   // Week labels come from the data (dynamic length). Chart oldest→newest so the
   // trend reads left-to-right in time; the table column order is newest→oldest.
   const weekCount = (overall ?? coaches[0])?.weeks.length ?? 0;
   const weekOrder = Array.from({ length: weekCount }, (_, i) => weekCount - 1 - i);
 
-  const trendData = weekOrder.map((li) => {
+  const weeklyAverageData = weekOrder.map((li) => {
     const sample = (overall ?? coaches[0])?.weeks[li];
-    const row: Record<string, string | number> = { week: sample?.label ?? `W${li + 1}` };
-    coachLineMeta.forEach((line) => {
-      row[line.key] = parseFloat((line.coach.weeks[li]?.absenceRatio ?? 0).toFixed(2));
-    });
-    if (overall) {
-      row["Company"] = parseFloat((overall.weeks[li]?.absenceRatio ?? 0).toFixed(2));
-    }
-    return row;
+    const ratios = coaches.map((coach) => coach.weeks[li]?.absenceRatio).filter((value): value is number => typeof value === "number" && Number.isFinite(value));
+    const averageCoachAbsence = ratios.length > 0 ? ratios.reduce((sum, value) => sum + value, 0) / ratios.length : 0;
+    const selected = selectedCoach === "all" ? averageCoachAbsence : (coaches.find((coach) => coach.coachName === selectedCoach)?.weeks[li]?.absenceRatio ?? 0);
+    return {
+      week: sample?.label ?? `W${li + 1}`,
+      averageCoachAbsence: Number(selected.toFixed(2)),
+      companyAverage: Number((overall?.weeks[li]?.absenceRatio ?? 0).toFixed(2)),
+    };
   });
-
-  const visibleCoachLines = selectedSeries === "all"
-    ? coachLineMeta
-    : coachLineMeta.filter((line) => line.key === selectedSeries);
-
-  const showCompany = selectedSeries === "all" || selectedSeries === "Company";
-
-  const trendLegendItems = [
-    ...visibleCoachLines.map((line) => ({ ...line, dashed: false })),
-    ...(showCompany ? [{ key: "Company", shortLabel: "Company", color: COMPANY_COLOR, dashed: true }] : []),
-  ];
 
   const avgData = coaches.map(r => ({
     name: r.coachName.split(" ")[0] + " " + (r.coachName.split(" ")[1]?.[0] ?? ""),
     avg: r.last10WeeksAbsenceRatio,
     company: overall?.last10WeeksAbsenceRatio ?? 0,
+    aboveCompany: r.last10WeeksAbsenceRatio > (overall?.last10WeeksAbsenceRatio ?? 0),
   }));
 
-
-  
   return (
     <div className="coach-summary-charts" style={{ display: "flex", flexDirection: "column", gap: "var(--space-4)" }}>
       {/* Chart 1: 10-week trend */}
       <div className="chart-card">
         <div className="chart-header">
           <div>
-            <h3 className="chart-title">Absence ratio trends — watch for coaches consistently above company average</h3>
-            <p className="chart-subtitle">10-week trend — all coaches vs company baseline</p>
+          <h3 className="chart-title">Coach Absence Analysis</h3>
+          <p className="chart-subtitle">10-week overview vs company average</p>
           </div>
           <div>
-            <label className="sr-only" htmlFor="trend-series-filter">Filter line</label>
             <select
-              id="trend-series-filter"
-              value={selectedSeries}
-              onChange={(e) => setSelectedSeries(e.target.value)}
+              aria-label="Coach scope"
+              value={selectedCoach}
+              onChange={(event) => setSelectedCoach(event.target.value)}
               style={{
                 borderRadius: "var(--radius-md)", border: "1px solid var(--color-border)",
                 background: "var(--color-canvas)", padding: "var(--space-1) var(--space-2)",
@@ -111,18 +72,20 @@ export default function CoachSummaryCharts({ records }: { records: CoachSummaryR
               }}
             >
               <option value="all">All Coaches</option>
-              {coachLineMeta.map((line) => (
-                <option key={line.key} value={line.key}>{line.shortLabel}</option>
-              ))}
-              <option value="Company">Company</option>
+              {coaches.map((coach) => <option key={coach.coachName} value={coach.coachName}>{coach.coachName}</option>)}
             </select>
+            <div style={{ marginTop: 8, padding: "8px 10px", maxWidth: 285, border: "1px solid #D9E4F2", borderRadius: 8, background: "#F7FAFE", color: "#52607A", fontSize: 10, lineHeight: 1.45 }}>
+              <div style={{ color: "#25324D", fontWeight: 700, marginBottom: 3 }}>How to read this analysis</div>
+              <div><strong>Top chart:</strong> weekly average absence across coaches vs company absence.</div>
+              <div><strong>Bottom chart:</strong> each coach&apos;s pooled 10-week absence rate vs company average.</div>
+            </div>
           </div>
         </div>
         <div className="chart-body">
           <ResponsiveContainer width="100%" height={220}>
-            <LineChart data={trendData} margin={{ top: 0, right: 30, bottom: 0, left: 0 }}>
+            <ComposedChart data={weeklyAverageData} margin={{ top: 18, right: 30, bottom: 0, left: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-              <XAxis dataKey="week" tick={axisStyle} />
+              <XAxis dataKey="week" tick={{ ...axisStyle, fill: "#25324D", fontWeight: 600 }} />
               <YAxis tick={axisStyle} tickFormatter={(v) => `${v}%`} />
               <Tooltip
                 contentStyle={tooltipStyle}
@@ -131,39 +94,15 @@ export default function CoachSummaryCharts({ records }: { records: CoachSummaryR
                 cursor={cursorStyle}
                 formatter={(value, name) => [`${value}%`, String(name)]}
               />
-              {visibleCoachLines.map((line) => (
-                <Line
-                  key={line.key}
-                  type="monotone"
-                  dataKey={line.key}
-                  name={line.shortLabel}
-                  stroke={line.color}
-                  strokeWidth={1.5}
-                  dot={false}
-                  activeDot={{ r: 3 }}
-                />
-              ))}
-              {showCompany && (
-                <Line
-                  type="monotone"
-                  dataKey="Company"
-                  name="Company"
-                  stroke={COMPANY_COLOR}
-                  strokeWidth={2.5}
-                  strokeDasharray="5 3"
-                  dot={false}
-                  activeDot={{ r: 4 }}
-                />
-              )}
-            </LineChart>
+              <Bar dataKey="averageCoachAbsence" name="Average Coach Absence" fill="#B9DCF5" radius={[5, 5, 0, 0]}>
+                <LabelList dataKey="averageCoachAbsence" position="top" formatter={(value: number) => `${Math.round(value)}%`} style={{ fill: "#102A68", fontSize: 12, fontWeight: 700 }} />
+              </Bar>
+              <Line type="monotone" dataKey="companyAverage" name="Company Average" stroke="#1458B8" strokeWidth={3} dot={{ r: 5, fill: "#fff", stroke: "#1458B8", strokeWidth: 2 }} activeDot={{ r: 6 }} />
+            </ComposedChart>
           </ResponsiveContainer>
-          <div style={{ marginTop: "var(--space-3)", display: "flex", flexWrap: "wrap", gap: "var(--space-3)" }}>
-            {trendLegendItems.map((item) => (
-              <span key={item.key} style={{ display: "inline-flex", alignItems: "center", gap: "var(--space-1)", fontSize: "var(--text-xs)", color: "var(--color-text-secondary)" }}>
-                <span style={{ display: "inline-block", width: 16, borderTop: `2px ${item.dashed ? "dashed" : "solid"} ${item.color}` }} />
-                {item.shortLabel}
-              </span>
-            ))}
+          <div style={{ marginTop: "var(--space-3)", display: "flex", justifyContent: "center", flexWrap: "wrap", gap: "var(--space-5)", fontSize: "var(--text-xs)", color: "var(--color-text-secondary)" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><span style={{ width: 13, height: 13, borderRadius: 3, background: "#B9DCF5" }} />{selectedCoach === "all" ? "Average Coach Absence" : `${selectedCoach} Absence`}</span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><span style={{ width: 18, borderTop: "3px solid #1458B8" }} />Company Average</span>
           </div>
         </div>
       </div>
@@ -172,15 +111,15 @@ export default function CoachSummaryCharts({ records }: { records: CoachSummaryR
       <div className="chart-card">
         <div className="chart-header">
           <div>
-            <h3 className="chart-title">Coaches above company average on 10-week absence rate need support</h3>
-            <p className="chart-subtitle">10-week average absence ratio per coach</p>
+            <h3 className="chart-title">Coaches above company average on 10-week absence rate</h3>
+            <p className="chart-subtitle">Absence rate per coach · company average: {(overall?.last10WeeksAbsenceRatio ?? 0).toFixed(0)}%</p>
           </div>
         </div>
         <div className="chart-body">
           <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={avgData} margin={{ top: 0, right: 10, bottom: 40, left: 0 }}>
+            <BarChart data={avgData} margin={{ top: 18, right: 18, bottom: 72, left: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border)" />
-              <XAxis dataKey="name" tick={axisStyle} angle={-35} textAnchor="end" interval={0} />
+              <XAxis dataKey="name" tick={{ ...axisStyle, fill: "#25324D", fontSize: 10 }} angle={-28} textAnchor="end" interval={0} height={72} />
               <YAxis tick={axisStyle} tickFormatter={(v) => `${v}%`} />
               <Tooltip
                 contentStyle={tooltipStyle}
@@ -195,9 +134,16 @@ export default function CoachSummaryCharts({ records }: { records: CoachSummaryR
                 strokeDasharray="4 4"
                 label={{ value: `Co. avg ${overall?.last10WeeksAbsenceRatio ?? 0}%`, fill: "#6B7280", fontSize: 10, position: "insideTopRight" }}
               />
-              <Bar dataKey="avg" name="10W Avg Absence %" fill={ACCENT} radius={[3, 3, 0, 0]} />
+              <Bar dataKey="avg" name="10W Avg Absence %" radius={[5, 5, 0, 0]}>
+                {avgData.map((entry) => <Cell key={entry.name} fill={entry.aboveCompany ? "#F87171" : "#6FD38A"} />)}
+                <LabelList dataKey="avg" position="top" formatter={(value: number) => `${Math.round(value)}%`} style={{ fill: "#102A68", fontSize: 12, fontWeight: 700 }} />
+              </Bar>
             </BarChart>
           </ResponsiveContainer>
+          <div style={{ marginTop: "var(--space-3)", display: "flex", justifyContent: "center", flexWrap: "wrap", gap: "var(--space-5)", fontSize: "var(--text-xs)", color: "var(--color-text-secondary)" }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><span style={{ width: 13, height: 13, borderRadius: 3, background: "#F87171" }} />Above Company Average</span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><span style={{ width: 13, height: 13, borderRadius: 3, background: "#6FD38A" }} />At or Below Company Average</span>
+          </div>
         </div>
       </div>
     </div>

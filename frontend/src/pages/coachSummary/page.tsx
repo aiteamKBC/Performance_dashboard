@@ -34,7 +34,7 @@ export default function CoachSummaryPage() {
       try {
         setLoading(true);
         setError(null);
-        applyResult(await fetchAttendanceWeeks(WEEKS_PER_PAGE));
+        applyResult(await fetchAttendanceWeeks(WEEKS_PER_PAGE, undefined, refreshToken > 0));
       } catch (err) {
         console.error('Failed to load attendance data:', err);
         setError('Failed to load attendance data from API.');

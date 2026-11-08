@@ -1,0 +1,25 @@
+{
+  "as_of": "2026-11-08",
+  "timezone": "Europe/London",
+  "coaches": 13,
+  "profiles": 425,
+  "matched_coaches": 13,
+  "totals": {
+    "PR": {
+      "required": 354,
+      "completed": 206,
+      "overdue": 148
+    },
+    "MCM": {
+      "required": 470,
+      "completed": 80,
+      "overdue": 390
+    }
+  },
+  "pending_marking_total": 201,
+  "directory_assignment_pending_total": 73,
+  "differences": [],
+  "directory_assignment_pending_differences": [],
+  "reference": "C:\\Users\\KENT ( HR )\\Desktop\\LMS_v2\\backend\\coach_api\\views.py",
+  "read_only": true
+}

@@ -63,11 +63,13 @@ def reference(root, connection, query):
               ReviewSource=lambda kind, aptem_id=None: SimpleNamespace(kind=kind, aptem_id=aptem_id))
     specs = {
         'learner_api/active_users.py': '_s _number _reported_minutes _progress_text otjh_progress_dedupe_key _selected_timer_seconds _manual_claimed_seconds _progress_record_minutes dedupe_otjh_progress_records _component_expected_hours_lookup completed_hours_value_from_progress',
+        'learner_api/subject_timing.py': 'measured_seconds',
+        'learner_api/extra_activity_month.py': 'valid_activity_month',
         'learner_api/progress_rules.py': '_kind progress_counts_as_achieved',
-        'learner_api/retake_timing.py': 'metadata stamp native_key native_choices measured_choice',
+        'learner_api/retake_timing.py': 'choice combine_seconds selected_attempt metadata stamp attempt_order native_key native_choices measured_choice',
         'learner_api/current_learning.py': 'instant actual_time_seconds is_unsynchronised_direct_save project_current source_payload_metadata source_reference merge_attempts measured_attempt_record merge_submissions attempts_relation_exists current_records subject_attempt_rows',
-        'learner_api/canonical_learning.py': '_validated_profile is_legacy_record counts_as_actual is_time_estimated counts_as_completed entries_for progress_records_with_completion allocations completion_reporting_instant recorded_seconds point_ratio metrics_from_records otjh_summary_bulk',
-        'learner_api/canonical_hours.py': 'pending_hour_records',
+        'learner_api/canonical_learning.py': 'recorded_source_key _validated_profile is_legacy_record counts_as_actual is_time_estimated counts_as_completed entries_for progress_records_with_completion allocations completion_reporting_instant recorded_seconds point_ratio metrics_from_records otjh_summary_bulk',
+        'learner_api/canonical_hours.py': 'full_hour_projection_ids extra_activity_hour_records pending_hour_records',
         'learner_api/monthly_log_sources.py': 'decoded number',
         'learner_api/progress_transfer_policy.py': 'is_old_record record_courses frozen_records',
         'learner_api/progress_transfer_store.py': 'decode read_state',
@@ -84,6 +86,7 @@ def reference(root, connection, query):
     ratio_ns = {}
     load(root, 'learner_api/ksb_points.py', 'point_ratio', ratio_ns)
     ns['shared_ratio'] = ratio_ns['point_ratio']
+    ns['CHOICES'] = frozenset({'keep', 'new', 'correct', 'add', 'retry'})
     ns['REQUESTS'] = '"Learner".progress_transfer_requests'
     ns['ITEMS'] = '"Learner".progress_transfer_items'
 
@@ -115,9 +118,12 @@ def reference(root, connection, query):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--lms-root', type=Path, required=True)
+    parser.add_argument('--output', type=Path)
+    parser.add_argument('--limit', type=int, default=0, help='Optional diagnostic sample size')
     args = parser.parse_args()
     env = dotenv_values(Path(__file__).resolve().parents[1] / '.env')
-    with psycopg.connect(env['LMS_DATABASE_URL'], connect_timeout=15,
+    dsn = env.get('LMS_DATABASE_URL') or env.get('Database_url')
+    with psycopg.connect(dsn, connect_timeout=15,
                          options='-c default_transaction_read_only=on') as connection:
         connection.execute('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY')
         connection.execute("SET LOCAL statement_timeout='60s'")
@@ -146,6 +152,8 @@ def main():
             u."Practical_period_end_date" AS source_practical_end
             FROM "Learner".learners l LEFT JOIN enrolment."Created_users" u ON u.id=l.enrolment_id
             WHERE lower(l.lifecycle_status) IN ('active','delivery')''')
+        if args.limit:
+            profiles = profiles[:args.limit]
         today = datetime.now(ZoneInfo('Europe/London')).date()
         with connection.cursor() as cursor:
             actual = read_otjh(cursor, [p['id'] for p in profiles], today=today)
@@ -171,8 +179,11 @@ def main():
                 if actual[p['id']][key] != value:
                     differences.append({'profile_id': p['id'], 'field': key,
                                         'performance': actual[p['id']][key], 'lms': value})
-        print(json.dumps({'profiles_checked': len(profiles), 'as_of': str(today),
-                          'differences': differences}, default=str))
+        report = json.dumps({'profiles_checked': len(profiles), 'as_of': str(today),
+                             'differences': differences, 'read_only': True}, default=str)
+        print(report)
+        if args.output:
+            args.output.write_text(report + '\n', encoding='utf-8')
         return bool(differences)
 
 

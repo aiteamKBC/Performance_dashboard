@@ -1,0 +1,82 @@
+{
+  "as_of": "2026-11-08T10:01:39.403862+00:00",
+  "read_only": true,
+  "reference": "C:\\Users\\KENT ( HR )\\Desktop\\LMS_v2\\backend\\coach_api\\selectors\\dashboard\\marking.py",
+  "coaches": [
+    {
+      "coach": "Adeyemi Adeshina",
+      "pending": 3,
+      "learners": 1
+    },
+    {
+      "coach": "Afaan Khan",
+      "pending": 0,
+      "learners": 0
+    },
+    {
+      "coach": "Aryan Harikumar",
+      "pending": 35,
+      "learners": 10
+    },
+    {
+      "coach": "Asmaa Hamazeen",
+      "pending": 23,
+      "learners": 15
+    },
+    {
+      "coach": "Femi Falodun",
+      "pending": 31,
+      "learners": 7
+    },
+    {
+      "coach": "Mahmoud Fouda",
+      "pending": 0,
+      "learners": 0
+    },
+    {
+      "coach": "Med Maher",
+      "pending": 68,
+      "learners": 17
+    },
+    {
+      "coach": "Omar Badr",
+      "pending": 4,
+      "learners": 3
+    },
+    {
+      "coach": "Omar Elshafey",
+      "pending": 19,
+      "learners": 3
+    },
+    {
+      "coach": "Patryk Zajac",
+      "pending": 12,
+      "learners": 6
+    },
+    {
+      "coach": "Radwa Samir",
+      "pending": 0,
+      "learners": 0
+    },
+    {
+      "coach": "Randa Elabd",
+      "pending": 0,
+      "learners": 0
+    },
+    {
+      "coach": "Rukshana Hussain",
+      "pending": 6,
+      "learners": 4
+    }
+  ],
+  "total_pending": 201,
+  "differences": [],
+  "compared_fields": [
+    "profile identity",
+    "learner name",
+    "programme",
+    "pending count",
+    "oldest date",
+    "latest date"
+  ]
+}

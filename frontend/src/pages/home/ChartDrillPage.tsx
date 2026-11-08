@@ -258,7 +258,6 @@ const CHARTS: ChartDef[] = [
     subtitle: "Current LMS queue; prior-week history unavailable",
     buildData: (agg) => agg.map((r) => ({
       name: r.name,
-      "Last Week": r.lastWeekPending,
       Pending: r.pending,
     })),
     chart: (data) => (
@@ -268,7 +267,6 @@ const CHARTS: ChartDef[] = [
         <YAxis tick={axisStyle} />
         <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={cursorStyle} />
         <Legend wrapperStyle={{ fontSize: 10, color: "rgba(255,255,255,0.5)", paddingTop: 8 }} />
-        <Bar dataKey="Last Week" fill={BLUE} radius={[4, 4, 0, 0]} maxBarSize={28} />
         <Bar dataKey="Pending" fill={RED} radius={[4, 4, 0, 0]} maxBarSize={28} />
       </BarChart>
     ),

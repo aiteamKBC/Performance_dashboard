@@ -132,7 +132,7 @@ export default function CoachCards({ records, onSelect, title = "Coaches" }: Coa
                   color={prRate == null ? "var(--color-text-muted)" : tone(prRate, 90, 70)}
                 />
                 <Stat label="OTJH Risk" value={otjhAtRisk} color={tone(otjhAtRisk, 4, 7, true)} />
-                <Stat label="Pending" value={r.pending} color={tone(r.pending, 12, 20, true)} />
+                <Stat label="Pending" value={r.pending} color={r.pending > 0 ? "var(--color-warning)" : "var(--color-success)"} />
                 <Stat
                   label="Attendance"
                   value={r.attendanceRate == null ? "—" : `${r.attendanceRate}%`}
@@ -146,12 +146,14 @@ export default function CoachCards({ records, onSelect, title = "Coaches" }: Coa
                 <div style={{ display: "flex", height: 6, borderRadius: 999, overflow: "hidden", background: "var(--color-canvas)" }}>
                   {(() => {
                     const on = otjhOnTrack, att = otjhNeedAttention, risk = otjhAtRisk;
-                    const total = on + att + risk || 1;
+                    const unavailable = Math.max(r.totalLearners - on - att - risk, 0);
+                    const total = on + att + risk + unavailable || 1;
                     return (
                       <>
                         <div style={{ width: `${(on / total) * 100}%`, background: "var(--color-success)" }} title={`On Track: ${on}`} />
                         <div style={{ width: `${(att / total) * 100}%`, background: "var(--color-warning)" }} title={`Need Attention: ${att}`} />
                         <div style={{ width: `${(risk / total) * 100}%`, background: "var(--color-danger)" }} title={`At Risk: ${risk}`} />
+                        <div style={{ width: `${(unavailable / total) * 100}%`, background: "#94A3B8" }} title={`Unavailable: ${unavailable}`} />
                       </>
                     );
                   })()}

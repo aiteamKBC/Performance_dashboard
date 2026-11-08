@@ -3,8 +3,8 @@ from datetime import date
 from types import SimpleNamespace
 import unittest
 
-from api.lms_otjh import to_date_metrics, programme_window, _validated_profile
-from api.lms_otjh_rules import project_current, frozen_records, progress_records_with_completion, number
+from api.lms_otjh import to_date_metrics, programme_window, _validated_profile, pending_hour_records
+from api.lms_otjh_rules import project_current, frozen_records, progress_records_with_completion, number, merge_submissions
 from api.lms_otjh_reviews import planned_meetings
 
 
@@ -89,6 +89,37 @@ class OtjhParityTests(unittest.TestCase):
             records = [first, second]
             projected = progress_records_with_completion(records, project_current(records, {}))
             self.assertEqual(sum(number(r['actual_seconds']) for r in projected), seconds)
+
+    def test_correct_add_retry_saved_attempt_choices_match_lms(self):
+        first = {**self.pending(quiz_ref='q1', passed=True), 'kind': 'quiz', 'actual_seconds': 3600}
+        for choice, seconds in [('correct', 1800), ('add', 5400), ('retry', 3600)]:
+            second = {**first, 'id': 2, 'actual_seconds': 1800,
+                      'submitted_at': '2026-10-21T10:00:00Z',
+                      'source_payload': {'retakeTimeChoice': choice}}
+            records = [first, second]
+            projected = progress_records_with_completion(records, project_current(records, {}))
+            self.assertEqual(sum(number(r['actual_seconds']) for r in projected), seconds)
+
+    def test_extra_activity_credits_saved_hours_once_and_keeps_selected_month(self):
+        submission = dict(id=42, status='accepted', activity_type='extra_activity',
+                          submitted_at='2026-11-08T10:00:00Z', activity_month='2026-10',
+                          actual_time_hours='0.5')
+        current = merge_submissions([], [submission])
+        rows = progress_records_with_completion([], current)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]['actual_seconds'], 1800)
+        self.assertEqual(rows[0]['reporting_month'], '2026-10')
+        self.assertEqual(merge_submissions(rows, [submission]), rows)
+
+    def test_extra_activity_is_retained_alongside_pending_native_save(self):
+        extra = dict(profile_id=1, id=42, status='accepted', activity_type='extra_activity',
+                     submitted_at='2026-11-08T10:00:00Z', actual_time_hours='0.5')
+        pending = self.pending(component_type='material', verified_seconds=3600,
+                               time_tracking_source='lms:timer')
+        responses = iter([[extra], [pending], []])
+        rows = pending_hour_records([dict(id=1, enrolment_id=10, learner_type='apprentice')],
+                                    lambda *_: next(responses))[1]
+        self.assertEqual(sum(r['actual_seconds'] for r in rows), 5400)
 
     def test_transfer_preserves_frozen_hours(self):
         old = {'id': 1, 'source_system': 'old_lms', 'actual_seconds': 999,

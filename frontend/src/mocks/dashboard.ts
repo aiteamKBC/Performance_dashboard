@@ -1,5 +1,5 @@
 export type ReviewPeriodKey = "4w" | "8w" | "12w" | "all";
-export type PeriodCounts = Record<ReviewPeriodKey, { required: number; completed: number }>;
+export type PeriodCounts = Record<ReviewPeriodKey, { required: number; completed: number; overdue: number }>;
 
 export interface CoachConflict {
   // "coach": different coach on Aptem and the LMS (counted under the LMS coach).
@@ -95,7 +95,7 @@ export interface CoachRecord {
   mcmCompletionRate12Weeks?: number;
   mcmBehind12Weeks?: number;
   // Learners whose Aptem coach and LMS coach are different coaches.
-  coachConflicts?: CoachConflict[];  // Per-learner required/completed per window (4w/8w/12w/all) for the home-page
+  coachConflicts?: CoachConflict[];  // LMS review counts per window (4w/8w/12w/all) for the home-page
   // PR & MCM performance charts' time-period filter.
   prByLearner?: PeriodCounts;
   mcmByLearner?: PeriodCounts;

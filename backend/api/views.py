@@ -212,6 +212,10 @@ class AttendanceWeeksView(APIView):
         count = max(1, min(count, 52))
         before = request.query_params.get("before") or None
         after = request.query_params.get("after") or None
+        # A manual refresh must also invalidate the short-lived LMS caseload
+        # cache; otherwise the attendance roster can lag behind Performance.
+        if request.query_params.get("refresh") in {"1", "true", "yes"}:
+            clear_lms_cache()
         response = Response(get_attendance_weeks(count=count, before=before, after=after))
         response["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response["Pragma"] = "no-cache"

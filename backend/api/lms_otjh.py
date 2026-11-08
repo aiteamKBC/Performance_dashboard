@@ -31,20 +31,84 @@ def _validated_profile(owner):
         raise ValueError('The consolidated learner identity needs review.')
     return owner
 
-def pending_hour_records(owners, query):
-    """Use the learner projection without hydrating a caseload's full history.
 
-    Stored seconds (including zero) remain authoritative. Only direct saves
-    without stored seconds or reporting segments can contribute extra hours.
-    Attempts and reflection-only rows cannot introduce additional ledger rows.
+def full_hour_projection_ids(owners, query):
+    """Find owners whose accepted hours cannot be summed from stored rows alone.
+
+    Local legacy timers live in attempt snapshots. Retakes may replace stored
+    credit, and transfers freeze historical facts. All three must use the same
+    read-only reconciliation as the learner page, including month allocation.
+    """
+
+    owners = list(owners)
+    if not owners:
+        return set()
+    result = {int(owner['id']) for owner in owners if owner.get('progress_transfer_active')}
+    profile_ids = [int(owner['id']) for owner in owners]
+    result.update(int(item['learner_id']) for item in query('''
+        SELECT DISTINCT learner_id FROM "Learner".learner_progress_entries
+        WHERE learner_id=ANY(%s) AND deleted_at IS NULL
+          AND source_payload->>'retakeTimeChoice' IN ('keep','new','correct','add','retry')''', [profile_ids]))
+    relation = query('SELECT to_regclass(%s) AS name', ['"Learner".subject_activity_attempts'])
+    if relation and relation[0].get('name'):
+        enrolment_ids = [int(owner['enrolment_id']) for owner in owners]
+        timed_enrolments = {int(item['enrolment_id']) for item in query('''
+            SELECT DISTINCT enrolment_id FROM "Learner".subject_activity_attempts
+            WHERE enrolment_id=ANY(%s) AND submitted_at IS NOT NULL AND completed IS TRUE
+              AND jsonb_typeof(definition->'studyTime')='object' ''', [enrolment_ids])}
+        result.update(int(owner['id']) for owner in owners
+                      if int(owner['enrolment_id']) in timed_enrolments)
+    return result
+
+def extra_activity_hour_records(owners, query):
+    """Read standalone extras once, excluding work already in the ledger.
+
+    Enrolment and learner kind jointly own a submission; ledger ownership uses
+    the profile ID. Keep the same lineage exclusions as merge_submissions.
+    No planned time, evidence hydration or historical writes are needed.
     """
 
     owners = {int(owner['id']): owner for owner in owners}
     result = {owner_id: [] for owner_id in owners}
     if not owners:
         return result
+    values = ','.join(['(%s,%s,%s)'] * len(owners))
+    params = [value for owner_id, owner in owners.items()
+              for value in (owner_id, str(owner['enrolment_id']), str(owner.get('learner_type') or ''))]
+    submissions = query(f'''WITH owners(profile_id,enrolment_id,learner_kind) AS (VALUES {values})
+        SELECT owners.profile_id,s.id,s.component_ref,s.progress_entry_id,s.status,
+            s.actual_time_hours,s.submitted_at,s.activity_type,s.activity_title,s.module_title,s.ksb_codes,
+            s.full_submission->'monthlyAssignment'->>'month' AS activity_month
+        FROM owners JOIN "Learner".learning_reflection_submissions s
+          ON s.learner_id=owners.enrolment_id AND s.learner_kind=owners.learner_kind
+        WHERE s.activity_type='extra_activity' AND s.status<>'draft' AND s.submitted_at IS NOT NULL
+          AND coalesce(s.full_submission->>'submissionOrigin','')<>'imported_legacy'
+          AND NOT EXISTS (SELECT 1 FROM "Learner".learner_progress_entries p
+            WHERE p.learner_id=owners.profile_id AND p.deleted_at IS NULL
+              AND (p.id=s.progress_entry_id OR (nullif(s.component_ref,'') IS NOT NULL AND p.component_ref=s.component_ref)
+                OR p.source_payload->>'original_source_ref'='reflection:' || s.id::text))
+        ORDER BY s.submitted_at,s.id''', params)
+    for record in submissions:
+        result[int(record['profile_id'])].append(record)
+    return {owner_id: [{**row, 'hours_only': True} for row in merge_submissions([], rows)]
+            for owner_id, rows in result.items()}
+
+
+def pending_hour_records(owners, query):
+    """Use the learner projection without hydrating a caseload's full history.
+
+    Stored seconds (including zero) remain authoritative. Only direct saves
+    without stored seconds or reporting segments can contribute extra hours.
+    Standalone extra activities contribute their saved hours separately;
+    unrelated reflection-only rows do not become additional ledger rows.
+    """
+
+    owners = {int(owner['id']): owner for owner in owners}
+    result = extra_activity_hour_records(owners.values(), query)
+    if not owners:
+        return result
     pending = query('''SELECT p.id,p.learner_id,p.kind,p.component_ref,
-        p.component_type,p.quiz_ref,p.passed,p.reported_time,p.submitted_at,
+        p.component_type,p.quiz_ref,p.passed,p.reported_time,p.submitted_at,p.declared_completed_at,p.started_at,
         p.time_tracking_source,p.claimed_seconds,p.verified_seconds,
         p.component_link_source,p.source_system,p.actual_seconds,p.accepted,
         p.reporting_month
@@ -90,7 +154,7 @@ def pending_hour_records(owners, query):
         pending_ids = {row['id'] for row in records}
         records += [row for row in context if int(row['learner_id']) == owner_id]
         decisions = markings.get((str(owner['enrolment_id']), str(owner.get('learner_type') or '')), {})
-        result[owner_id] = [row for row in project_current(records, decisions) if row['id'] in pending_ids]
+        result[owner_id].extend(row for row in project_current(records, decisions) if row['id'] in pending_ids)
     return result
 
 class Reader:
@@ -137,17 +201,7 @@ class Reader:
         if not owners:
             return result
         profile_ids = [int(owner['id']) for owner in owners.values()]
-        retake_profiles = {int(item['learner_id']) for item in self.query('''
-            SELECT DISTINCT learner_id FROM "Learner".learner_progress_entries
-            WHERE learner_id=ANY(%s) AND deleted_at IS NULL
-              AND source_payload->>'retakeTimeChoice' IN ('keep','new')''', [profile_ids])}
-        relation = self.query('SELECT to_regclass(%s) AS name', ['"Learner".subject_activity_attempts'])
-        if relation and relation[0].get('name'):
-            selected_enrolments = {int(item['enrolment_id']) for item in self.query('''
-                SELECT DISTINCT enrolment_id FROM "Learner".subject_activity_attempts
-                WHERE enrolment_id=ANY(%s) AND submitted_at IS NOT NULL AND completed IS TRUE
-                  AND definition->'studyTime'->>'retakeTimeChoice' IN ('keep','new')''', [list(owners)])}
-            retake_profiles.update(int(owner['id']) for key, owner in owners.items() if key in selected_enrolments)
+        projected_profiles = full_hour_projection_ids(owners.values(), self.query)
         records = {profile_id: [] for profile_id in profile_ids}
         # Aggregate before transfer: full caseloads can contain many historical rows.
         # Mirror number(): ignore non-finite values and clamp negative seconds to 0.
@@ -158,8 +212,12 @@ class Reader:
             WHERE learner_id=ANY(%s) AND deleted_at IS NULL AND accepted IS TRUE
             GROUP BY learner_id''', [profile_ids]):
             records[int(item['learner_id'])].append({**item, 'accepted': True})
-        for profile_id, pending in pending_hour_records(owners.values(), self.query).items():
-            records[profile_id].extend(pending)
+        # Keep each supplemental read bounded below the request's per-query
+        # timeout without changing which owners or records contribute hours.
+        owner_batch = list(owners.values())
+        for offset in range(0, len(owner_batch), 32):
+            for profile_id, pending in pending_hour_records(owner_batch[offset:offset + 32], self.query).items():
+                records[profile_id].extend(pending)
         targets = {profile_id: {} for profile_id in profile_ids}
         for item in self.query('''SELECT DISTINCT ON (t.learner_id,t.report_month)
             t.learner_id,t.report_month,t.target_hours
@@ -176,7 +234,7 @@ class Reader:
                 targets[int(item['learner_id'])][item['report_month']] = float(item['target_hours'])
         for enrolment_id, owner in owners.items():
             profile_id = int(owner['id'])
-            if owner.get('progress_transfer_active') or profile_id in retake_profiles:
+            if profile_id in projected_profiles:
                 records[profile_id] = self.entries_for(owner)
             result[enrolment_id] = {
                 'profile_id': profile_id,
@@ -195,6 +253,7 @@ class Reader:
     def current_records(self, owner, records):
         submissions = self.query('''SELECT id,component_ref,progress_entry_id,status,actual_time_hours,
             submitted_at,activity_type,activity_title,module_title,ksb_codes,
+            full_submission->'monthlyAssignment'->>'month' AS activity_month,
             full_submission->>'submissionOrigin' = 'imported_legacy' AS imported
             FROM "Learner".learning_reflection_submissions
             WHERE learner_id=%s AND learner_kind=%s AND activity_type IN ('assignment','extra_activity')

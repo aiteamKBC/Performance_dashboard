@@ -133,7 +133,8 @@ def _review_display_date(planned_date, status_raw, category):
 
 
 def _today():
-    return date.today()
+    from zoneinfo import ZoneInfo
+    return datetime.now(ZoneInfo("Europe/London")).date()
 
 
 def _months_back(d, n):
@@ -346,6 +347,7 @@ def _row_review_slots(row, date_prefix, status_prefix, count):
             # Completed reviews reflect their completion date (from the status
             # cell); everything else reflects the planned date.
             "shown": _review_display_date(planned, status_raw, category),
+            "slot": i,
         })
     return slots
 
@@ -353,10 +355,10 @@ def _row_review_slots(row, date_prefix, status_prefix, count):
 def _lms_review_slots(reviews):
     """LMS review instances -> the same slot shape as _row_review_slots."""
     slots = []
-    for rv in reviews:
+    for i, rv in enumerate(sorted(reviews, key=lambda item: item["planned"]), start=1):
         category = _classify_status(rv["status_raw"])
         shown = rv["completed_on"] if category == "Completed" and rv["completed_on"] else rv["planned"]
-        slots.append({"planned": rv["planned"], "category": category, "shown": shown})
+        slots.append({"planned": rv["planned"], "category": category, "shown": shown, "slot": i})
     return slots
 
 
@@ -785,14 +787,10 @@ def compute_coaches_lateness(source=None):
     splits add up to it.
     """
     today = _today()
-    empty_period = {"required": 0, "completed": 0}
-
     lms_data = get_lms_data()
     if not lms_data.get("caseload_available"):
-        # The legacy Aptem tables are still enough to render the page. Do not
-        # turn a temporary LMS outage or timeout into a permanently blocked
-        # Coaches Performance screen.
-        log.warning("LMS caseload unavailable; serving Aptem-only coach metrics.")
+        # Missing authoritative data must not render as a valid zero.
+        raise LmsDataUnavailable("Authoritative LMS population is unavailable.")
     resolve = _owner_resolver(lms_data, source)
     extras = [] if source == "aptem" else lms_data["extras"]
 
@@ -803,23 +801,12 @@ def compute_coaches_lateness(source=None):
     # totals, otherwise Pending would come from LMS while Accepted/Total came
     # from a different population.
     marking = {}
-    pr = _aggregate_reviews(today, _pr_learners(resolve, extras))
-    mcm = _aggregate_reviews(today, _mcm_learners(resolve, extras))
     conflicts = _system_conflicts(lms_data["caseload"], lms_data)
 
     caseload_by_coach = {}
     for learner in lms_data["caseload"]:
         if not _is_excluded_owner(learner["coach"]):
             caseload_by_coach.setdefault(learner["coach"], []).append(learner)
-    queue_by_coach = {}
-    visible_lms_ids = {learner["id"] for learner in lms_data["caseload"]}
-    for learner in lms_data["marking_queue"]:
-        # Keep the KPI population consistent with Total Learners: submissions
-        # from withdrawn, onboarding, completed, or EPA profiles do not belong
-        # to the coach's active/delivery caseload.
-        if learner.get("id") not in visible_lms_ids:
-            continue
-        queue_by_coach[learner["coach"]] = queue_by_coach.get(learner["coach"], 0) + learner["pending"]
     marking_by_coach = {}
     for learner in lms_data["caseload"]:
         owner = learner["coach"]
@@ -843,17 +830,13 @@ def compute_coaches_lateness(source=None):
         x = lms.get(owner, {})
         mk = marking.get(owner, {})
         lms_mk = marking_by_coach.get(owner, {})
-        p = pr.get(owner, {})
-        m = mcm.get(owner, {})
-
-        p_periods = p.get("periods", {})
-        p_weeks = p.get("weeks", {})
-        m_periods = m.get("periods", {})
-
         owned = caseload_by_coach[owner]
         total_learners = len(owned)
         owner_email = _lower(owned[0].get("coach_email")) if owned else ""
         performance = lms_data.get("performance_by_email", {}).get(owner_email, {})
+        if any(key not in performance for key in ('pr_periods', 'mcm_periods', 'pending')):
+            raise LmsDataUnavailable("Authoritative LMS review and marking metrics are unavailable.")
+        p_weeks = performance.get("pr_weeks", {})
         # Engagement = learners with learning activity on the LMS in the last
         # 30 days (the same recent / total the charts plot). Attendance is a
         # separate figure.
@@ -861,9 +844,9 @@ def compute_coaches_lateness(source=None):
             1 for learner in owned
             if learner.get("last_activity") and 0 <= (today - learner["last_activity"]).days <= 29
         )
-        engagement = round((recent / total_learners) * 100) if total_learners else 0
+        engagement = ((recent * 2000 + total_learners) // (2 * total_learners)) / 10 if total_learners else 0
 
-        pending = queue_by_coach.get(owner, 0)
+        pending = performance["pending"]
         lms_days = lms_mk.get("days", {})
         days = {
             "Today": lms_days.get("today", 0),
@@ -882,51 +865,15 @@ def compute_coaches_lateness(source=None):
         last_sub = min_date.isoformat() if min_date else ""
         elapsed = (today - min_date).days if min_date else 0
 
-        p_learner = p.get("learner", {})
-        m_learner = m.get("learner", {})
-
-        pr4 = p_periods.get("4w", empty_period)
-        pr8 = p_periods.get("8w", empty_period)
-        # PR 12-week and MCM 4-week are counted PER LEARNER (one per learner, by
-        # their most recent due review's status), not per review slot — see
-        # _aggregate_reviews. The other windows stay per slot.
-        pr12 = p_learner.get("12w", empty_period)
-        mcm4 = m_learner.get("4w", empty_period)
-        mcm8 = m_periods.get("8w", empty_period)
-        mcm12 = m_periods.get("12w", empty_period)
-
-        # The LMS review table is authoritative when present.  The old Aptem
-        # review tables are optional in this deployment, so do not turn a
-        # missing legacy table into a false 0% card.
-        if performance.get("pr_required") is not None:
-            pr12 = {
-                "required": performance.get("pr_required", 0),
-                "completed": performance.get("pr_completed", 0),
-            }
-        if performance.get("mcm_required") is not None:
-            mcm4 = {
-                "required": performance.get("mcm_required", 0),
-                "completed": performance.get("mcm_completed", 0),
-            }
+        pr_bylearner = performance['pr_periods']
+        mcm_bylearner = performance['mcm_periods']
+        pr4, pr8, pr12 = (pr_bylearner[k] for k in ('4w', '8w', '12w'))
+        mcm4, mcm8, mcm12 = (mcm_bylearner[k] for k in ('4w', '8w', '12w'))
 
         def rate(part):
             return round((part["completed"] / part["required"]) * 1000) / 10 if part["required"] else 0
 
         completion_rate = rate(pr12)
-
-        # Per-learner required/completed for every window (4w/8w/12w/all) — used
-        # by the home-page PR/MCM performance charts' time-period filter.
-        def bylearner_map(learner):
-            return {
-                k: {
-                    "required": learner.get(k, empty_period)["required"],
-                    "completed": learner.get(k, empty_period)["completed"],
-                }
-                for k in ("4w", "8w", "12w", "all")
-            }
-
-        pr_bylearner = bylearner_map(p_learner)
-        mcm_bylearner = bylearner_map(m_learner)
 
         case_owner_id = a.get("caseOwnerId") or mk.get("caseOwnerId")
         phone = a.get("phone") or mk.get("phone") or ""
@@ -966,6 +913,8 @@ def compute_coaches_lateness(source=None):
             "pending": pending,
             "learner_count_source": "lms:coach-visible-profiles",
             "marking_source": "lms:learning_reflection_submissions",
+            "pending_population": "all-named-owned-profiles:all-pending-activity-types",
+            "review_population": "named-active-delivery-profiles-with-enrolment",
             "evidence_accepted": lms_mk.get("accepted", 0),
             "evidence_referred": lms_mk.get("referred", 0),
             "referred_closure": 0,
@@ -1023,9 +972,14 @@ def compute_coaches_lateness(source=None):
             "required_mcm": mcm4["required"],
             "completed_mcm": mcm4["completed"],
 
-            # Per-learner required/completed per window (4w/8w/12w/all) for the
-            # home-page PR & MCM performance charts' time-period filter.
+            # Canonical review counts shared by cards and charts. Legacy
+            # bylearner keys are aliases only; the counting unit is a review.
+            "pr_periods": pr_bylearner,
+            "review_source": "lms:Learner.reviews",
+            "review_count_unit": "review",
+            "review_as_of": today.isoformat(),
             "pr_bylearner": pr_bylearner,
+            "mcm_periods": mcm_bylearner,
             "mcm_bylearner": mcm_bylearner,
 
             # Learners whose Aptem and LMS coach or status disagree
@@ -1214,6 +1168,13 @@ def compute_coach_drill(coach_name=None, case_owner_id=None, source=None):
                         for l in lms_data["marking_queue"]
                         if l.get("id") in owned_ids and _owner_matches(l["coach"], None, name, cid)]
 
+    owner_email = _lower(owned[0].get('coach_email')) if owned else ''
+    owner_metrics = lms_data.get('performance_by_email', {}).get(owner_email, {})
+    if 'pending_learners' in owner_metrics:
+        pending_learners = owner_metrics['pending_learners']
+    # This metric has no equivalent in the current LMS.
+    closure_learners = []
+
     # Programme lookup (email -> programme, name -> programme) to enrich the
     # per-review rows, since the review tables don't carry programme.
     prog_by_email, prog_by_name = {}, {}
@@ -1236,11 +1197,14 @@ def compute_coach_drill(coach_name=None, case_owner_id=None, source=None):
     # target date was 29 Oct). The KPI cards still count only current-week rows.
     timetable_rows = []
     timetable_keys = set()
-    for item in lms_timetable_rows:
+    timetable_slot_numbers = {}
+    for item in sorted(lms_timetable_rows, key=lambda value: (value.get("learner_id", 0), value.get("metric", ""), value.get("date", ""))):
         learner = next((row for row in per_learner if row.get("lms_id") == item.get("learner_id")), None)
         if learner is None:
             continue
         timetable_keys.add((_lower(learner.get("email")), item["metric"]))
+        timetable_key = (item.get("learner_id"), item["metric"])
+        timetable_slot_numbers[timetable_key] = timetable_slot_numbers.get(timetable_key, 0) + 1
         timetable_rows.append({
             "name": learner["name"],
             "email": learner.get("email") or "",
@@ -1248,6 +1212,7 @@ def compute_coach_drill(coach_name=None, case_owner_id=None, source=None):
             "metric": item["metric"],
             "status": item["status"],
             "date": item["date"],
+            "slot": timetable_slot_numbers[timetable_key],
         })
     if timetable_rows:
         review_rows = [
@@ -1259,6 +1224,8 @@ def compute_coach_drill(coach_name=None, case_owner_id=None, source=None):
         "coach": name,
         "case_owner_id": cid,
         "per_learner": per_learner,
+        "pending_marking": pending_learners,
+        "pending_marking_count": sum(row["pending_count"] for row in pending_learners),
         "catchups_this_week": catchups,
         "week_start": work_week_start.isoformat(),
         "week_end": work_week_end.isoformat(),
@@ -1541,6 +1508,7 @@ def _review_rows(learners, metric, programme_fn):
                 "metric": metric,
                 "status": slot["category"],
                 "date": slot["shown"].isoformat(),
+                "slot": slot.get("slot"),
             })
     out.sort(key=lambda x: (x["name"], x["date"]))
     return out

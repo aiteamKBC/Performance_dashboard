@@ -1,0 +1,144 @@
+[
+  {
+    "coach": "Adeyemi Adeshina",
+    "directory_card": 3,
+    "visible_caseload_all_pending": 3,
+    "all_owned_pending": 3,
+    "types": {
+      "extra_activity": 3
+    }
+  },
+  {
+    "coach": "Afaan Khan",
+    "directory_card": 0,
+    "visible_caseload_all_pending": 0,
+    "all_owned_pending": 0,
+    "types": {}
+  },
+  {
+    "coach": "Aryan Harikumar",
+    "directory_card": 20,
+    "visible_caseload_all_pending": 35,
+    "all_owned_pending": 35,
+    "types": {
+      "reading": 4,
+      "quiz": 7,
+      "extra_activity": 18,
+      "slide deck": 4,
+      "assignment": 2
+    }
+  },
+  {
+    "coach": "Asmaa Hamazeen",
+    "directory_card": 8,
+    "visible_caseload_all_pending": 23,
+    "all_owned_pending": 23,
+    "types": {
+      "reading": 7,
+      "session": 7,
+      "quiz": 1,
+      "extra_activity": 2,
+      "assignment": 6
+    }
+  },
+  {
+    "coach": "Femi Falodun",
+    "directory_card": 3,
+    "visible_caseload_all_pending": 31,
+    "all_owned_pending": 31,
+    "types": {
+      "reading": 7,
+      "video": 6,
+      "quiz": 1,
+      "extra_activity": 1,
+      "podcast": 7,
+      "slide deck": 7,
+      "assignment": 2
+    }
+  },
+  {
+    "coach": "Mahmoud Fouda",
+    "directory_card": 0,
+    "visible_caseload_all_pending": 0,
+    "all_owned_pending": 0,
+    "types": {}
+  },
+  {
+    "coach": "Med Maher",
+    "directory_card": 23,
+    "visible_caseload_all_pending": 68,
+    "all_owned_pending": 68,
+    "types": {
+      "reading": 13,
+      "session": 11,
+      "video": 12,
+      "quiz": 2,
+      "extra_activity": 14,
+      "podcast": 2,
+      "slide deck": 5,
+      "assignment": 9
+    }
+  },
+  {
+    "coach": "Omar Badr",
+    "directory_card": 0,
+    "visible_caseload_all_pending": 4,
+    "all_owned_pending": 4,
+    "types": {
+      "session": 2,
+      "slide deck": 2
+    }
+  },
+  {
+    "coach": "Omar Elshafey",
+    "directory_card": 6,
+    "visible_caseload_all_pending": 11,
+    "all_owned_pending": 19,
+    "types": {
+      "reading": 3,
+      "video": 1,
+      "quiz": 1,
+      "extra_activity": 6,
+      "podcast": 2,
+      "slide deck": 6
+    }
+  },
+  {
+    "coach": "Patryk Zajac",
+    "directory_card": 7,
+    "visible_caseload_all_pending": 12,
+    "all_owned_pending": 12,
+    "types": {
+      "reading": 1,
+      "video": 2,
+      "quiz": 2,
+      "extra_activity": 6,
+      "assignment": 1
+    }
+  },
+  {
+    "coach": "Radwa Samir",
+    "directory_card": 0,
+    "visible_caseload_all_pending": 0,
+    "all_owned_pending": 0,
+    "types": {}
+  },
+  {
+    "coach": "Randa Elabd",
+    "directory_card": 0,
+    "visible_caseload_all_pending": 0,
+    "all_owned_pending": 0,
+    "types": {}
+  },
+  {
+    "coach": "Rukshana Hussain",
+    "directory_card": 3,
+    "visible_caseload_all_pending": 6,
+    "all_owned_pending": 6,
+    "types": {
+      "video": 2,
+      "session": 1,
+      "assignment": 3
+    }
+  }
+]

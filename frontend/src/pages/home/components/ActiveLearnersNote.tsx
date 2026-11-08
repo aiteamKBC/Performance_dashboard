@@ -16,7 +16,7 @@ export default function ActiveLearnersNote() {
         Total Learners follows the LMS coach caseload and includes only learners with
         programme status Active or Delivery. Learners on break, onboarding, withdrawn,
         completed and EPA stages are excluded.
-        Pending Marking counts submissions awaiting tutor review or escalated in the LMS.
+        Pending Marking follows the full LMS marking queue: all activity types awaiting tutor review or escalated, including owned profiles outside this active caseload.
       </span>
     </div>
   );

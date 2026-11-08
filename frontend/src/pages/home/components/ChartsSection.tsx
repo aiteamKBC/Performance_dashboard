@@ -13,10 +13,10 @@ const PERIOD_OPTIONS: { key: ReviewPeriodKey; label: string }[] = [
 ];
 
 const emptyPeriodCounts = (): PeriodCounts => ({
-  "4w": { required: 0, completed: 0 },
-  "8w": { required: 0, completed: 0 },
-  "12w": { required: 0, completed: 0 },
-  all: { required: 0, completed: 0 },
+  "4w": { required: 0, completed: 0, overdue: 0 },
+  "8w": { required: 0, completed: 0, overdue: 0 },
+  "12w": { required: 0, completed: 0, overdue: 0 },
+  all: { required: 0, completed: 0, overdue: 0 },
 });
 
 function addPeriodCounts(target: PeriodCounts, src?: PeriodCounts) {
@@ -24,6 +24,7 @@ function addPeriodCounts(target: PeriodCounts, src?: PeriodCounts) {
   (Object.keys(target) as ReviewPeriodKey[]).forEach((k) => {
     target[k].required += src[k]?.required ?? 0;
     target[k].completed += src[k]?.completed ?? 0;
+    target[k].overdue += src[k]?.overdue ?? 0;
   });
 }
 
@@ -38,6 +39,7 @@ interface CaseOwnerAggregate {
   evidenceAccepted: number;
   evidenceReferred: number;
   referredClosure: number;
+  referredClosureAvailable: boolean;
   lastWeekPending: number | null;
   pending: number;
   prRequired4Weeks: number;
@@ -135,7 +137,7 @@ function aggregateByCaseOwner(records: CoachRecord[]): CaseOwnerAggregate[] {
     const name = (r.caseOwner || r.coach || r.associate || "Unknown").trim() || "Unknown";
     const current = map.get(name) ?? {
       name, totalLearners: 0, recentSubmitters: 0, evidenceAccepted: 0,
-      evidenceReferred: 0, referredClosure: 0, lastWeekPending: 0, pending: 0,
+      evidenceReferred: 0, referredClosure: 0, referredClosureAvailable: true, lastWeekPending: 0, pending: 0,
       prRequired4Weeks: 0, prCompleted4Weeks: 0, prDoneOld4Weeks: 0,
       prOverallRequired: 0, prOverallCompleted: 0,
       mcmRequired4Weeks: 0, mcmCompleted4Weeks: 0,
@@ -147,6 +149,7 @@ function aggregateByCaseOwner(records: CoachRecord[]): CaseOwnerAggregate[] {
     current.evidenceAccepted += r.evidenceAccepted;
     current.evidenceReferred += r.evidenceReferred;
     current.referredClosure += r.referredClosure;
+    current.referredClosureAvailable &&= r.referredClosureAvailable !== false;
     current.lastWeekPending = current.lastWeekPending == null || r.lastWeekPending == null ? null : current.lastWeekPending + r.lastWeekPending;
     current.pending += r.pending;
     current.prRequired4Weeks += r.prRequired4Weeks;
@@ -198,7 +201,6 @@ export default function ChartsSection({ records }: ChartsSectionProps) {
 
   const assignmentData = grouped.map((r) => ({
     name: r.name,
-    "Last Week": r.lastWeekPending,
     Pending: r.pending,
   }));
 
@@ -207,13 +209,14 @@ export default function ChartsSection({ records }: ChartsSectionProps) {
     "On Track": r.otjhOnTrack,
     "Need Attention": r.otjhNeedAttention,
     "At Risk": r.otjhAtRisk,
+    Unavailable: Math.max(r.totalLearners - r.otjhOnTrack - r.otjhNeedAttention - r.otjhAtRisk, 0),
   }));
 
-  const perfRow = (name: string, counts: { required: number; completed: number }) => ({
+  const perfRow = (name: string, counts: { required: number; completed: number; overdue: number }) => ({
     name,
     Required: counts.required,
     Completed: counts.completed,
-    "Over Due": Math.max(counts.required - counts.completed, 0),
+    "Over Due": counts.overdue,
   });
 
   const prPerfData = grouped.map((r) => perfRow(r.name, r.prByLearner[prPeriod]));
@@ -231,8 +234,8 @@ export default function ChartsSection({ records }: ChartsSectionProps) {
 
       <div className="chart-grid">
         <ChartCard
-          title="Engagement varies significantly across case owners"
-          subtitle="Learner engagement % by case owner"
+          title="Learner engagement by case owner"
+          subtitle="Learners with LMS activity in the last 30 days (%)"
         >
           <ResponsiveContainer width="100%" height={160}>
             <BarChart data={engagementData} margin={{ top: 4, right: 8, left: -20, bottom: 36 }}>
@@ -249,7 +252,11 @@ export default function ChartsSection({ records }: ChartsSectionProps) {
           title="Referred closure count per case owner"
           subtitle="Total referred closures"
         >
-          <ResponsiveContainer width="100%" height={160}>
+          {!grouped.every((r) => r.referredClosureAvailable) ? (
+            <div className="empty-state" style={{ padding: "var(--space-4)" }}>
+              <p>Unavailable in the current LMS</p>
+            </div>
+          ) : <ResponsiveContainer width="100%" height={160}>
             <BarChart data={closureData} margin={{ top: 4, right: 8, left: -20, bottom: 36 }}>
               <CartesianGrid vertical={false} stroke="var(--color-border)" />
               <XAxis dataKey="name" tick={axisStyle} angle={-28} textAnchor="end" interval={0} height={44} tickMargin={6} tickFormatter={formatCaseOwnerLabel} />
@@ -257,7 +264,7 @@ export default function ChartsSection({ records }: ChartsSectionProps) {
               <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={cursorStyle} formatter={(v) => [v, "Referred Closure"]} />
               <Bar dataKey="ReferredClosure" fill={C2} radius={[3, 3, 0, 0]} maxBarSize={28} />
             </BarChart>
-          </ResponsiveContainer>
+          </ResponsiveContainer>}
         </ChartCard>
 
         <ChartCard
@@ -273,7 +280,8 @@ export default function ChartsSection({ records }: ChartsSectionProps) {
               <Legend wrapperStyle={{ fontSize: 10, color: "var(--color-text-secondary)", paddingTop: 8 }} />
               <Bar dataKey="On Track" stackId="a" fill={C4} maxBarSize={36} />
               <Bar dataKey="Need Attention" stackId="a" fill={C3} maxBarSize={36} />
-              <Bar dataKey="At Risk" stackId="a" fill={C5} radius={[3, 3, 0, 0]} maxBarSize={36} />
+              <Bar dataKey="At Risk" stackId="a" fill={C5} maxBarSize={36} />
+              <Bar dataKey="Unavailable" stackId="a" fill={C6} radius={[3, 3, 0, 0]} maxBarSize={36} />
             </BarChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -289,7 +297,6 @@ export default function ChartsSection({ records }: ChartsSectionProps) {
               <YAxis tick={axisStyle} />
               <Tooltip contentStyle={tooltipStyle} labelStyle={tooltipLabelStyle} itemStyle={tooltipItemStyle} cursor={cursorStyle} />
               <Legend wrapperStyle={{ fontSize: 10, color: "var(--color-text-secondary)", paddingTop: 8 }} />
-              <Bar dataKey="Last Week" fill={C2} radius={[3, 3, 0, 0]} maxBarSize={22} />
               <Bar dataKey="Pending" fill={C5} radius={[3, 3, 0, 0]} maxBarSize={22} />
             </BarChart>
           </ResponsiveContainer>
@@ -297,7 +304,7 @@ export default function ChartsSection({ records }: ChartsSectionProps) {
 
         <ChartCard
           title="Progress review performance"
-          subtitle={`Required vs completed vs over due — by learner · ${periodLabel(prPeriod)}`}
+          subtitle={`Required vs completed vs over due — review counts · ${periodLabel(prPeriod)}`}
           action={<PeriodSelect value={prPeriod} onChange={setPrPeriod} />}
         >
           <ResponsiveContainer width="100%" height={160}>
@@ -316,7 +323,7 @@ export default function ChartsSection({ records }: ChartsSectionProps) {
 
         <ChartCard
           title="MCM performance"
-          subtitle={`Required vs completed vs over due — by learner · ${periodLabel(mcmPeriod)}`}
+          subtitle={`Required vs completed vs over due — review counts · ${periodLabel(mcmPeriod)}`}
           action={<PeriodSelect value={mcmPeriod} onChange={setMcmPeriod} />}
         >
           <ResponsiveContainer width="100%" height={160}>

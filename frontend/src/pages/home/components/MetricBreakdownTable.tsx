@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { DrillLearnerRow, ReviewRow } from "@/services/coachesLateness";
+import type { DrillLearnerRow, ReviewRow, PendingMarkingRow } from "@/services/coachesLateness";
 import { downloadXlsx, type Cell } from "@/utils/xlsx";
 import { parseProgressHours } from "@/utils/otjh";
 import { toLearnerView } from "@/utils/learners";
@@ -13,6 +13,9 @@ const STATUS_COLOR: Record<string, string> = {
   "Awaiting Signature": "#EA580C",
   "In Progress": "#4F46E5",
   "Not Scheduled": "#DC2626",
+  Rescheduled: "#B65313",
+  Cancelled: "#6B7280",
+  Archived: "#6B7280",
 };
 
 function statusPill(value: string) {
@@ -33,7 +36,7 @@ const METRICS = [
   { key: "MCM", label: "MCM" },
   { key: "OTJH", label: "OTJH" },
   { key: "ENGAGED", label: "Engaged" },
-  { key: "PENDING", label: "Evidence Pending" },
+  { key: "PENDING", label: "Pending Marking" },
   { key: "CLOSURE", label: "Referred Closure" },
   { key: "RECENT", label: "Recent Submitters" },
 ] as const;
@@ -43,8 +46,8 @@ const REVIEW_METRICS = new Set(["PR", "MCM"]);
 // Status options per metric. PR/MCM share the review statuses; OTJH filters by
 // its risk bands. Metrics not listed here have no status filter.
 const STATUS_OPTIONS: Record<string, string[]> = {
-  PR: ["Completed", "Scheduled", "Awaiting Signature", "Not Scheduled", "In Progress"],
-  MCM: ["Completed", "Scheduled", "Awaiting Signature", "Not Scheduled", "In Progress"],
+  PR: ["Completed", "Scheduled", "Awaiting Signature", "Not Scheduled", "In Progress", "Rescheduled", "Cancelled", "Archived"],
+  MCM: ["Completed", "Scheduled", "Awaiting Signature", "Not Scheduled", "In Progress", "Rescheduled", "Cancelled", "Archived"],
   OTJH: ["At Risk", "Need Attention", "On Track"],
 };
 
@@ -65,10 +68,12 @@ interface MetricRow {
   metricKey: string;    // PR / MCM / OTJH / ...
   status: string;
   date: string;         // ISO or ""
+  slot?: number;        // original source slot, 1-based when available
   // OTJH-only detail columns (shown in place of Window/Date when OTJH selected).
   completed?: number;
   target?: string;
   targetHours?: number;   // numeric form of the computed target (for Excel export)
+  pendingCount?: number;
   progressHours?: string;
   progressVariance?: string;
 }
@@ -137,15 +142,15 @@ function withinPeriod(dateIso: string, today: Date, months: number | null): bool
  * Build table rows:
  *  - PR/MCM = one row per individual review slot (from `reviewRows`), so each
  *    Completed/Scheduled/etc. review is its own filterable row.
- *  - OTJH/Engaged/Pending/Closure/Recent = one row per learner (from `learners`).
+ *  - Pending = canonical marking queue; other metrics use the learner table.
  */
-function buildRows(learners: DrillLearnerRow[], reviewRows: ReviewRow[]): MetricRow[] {
+function buildRows(learners: DrillLearnerRow[], reviewRows: ReviewRow[], pendingRows: PendingMarkingRow[]): MetricRow[] {
   const out: MetricRow[] = [];
 
   for (const r of reviewRows) {
     out.push({
       name: r.name, email: r.email, programme: r.programme,
-      metric: r.metric, metricKey: r.metric, status: r.status, date: r.date,
+      metric: r.metric, metricKey: r.metric, status: r.status, date: r.date, slot: r.slot,
     });
   }
 
@@ -168,9 +173,13 @@ function buildRows(learners: DrillLearnerRow[], reviewRows: ReviewRow[]): Metric
       });
     }
     if (l.submitted > 0) out.push({ ...base, metric: "Engaged", metricKey: "ENGAGED", status: "Engaged", date: l.last_sub });
-    if (l.pending > 0) out.push({ ...base, metric: "Evidence Pending", metricKey: "PENDING", status: `${l.pending} pending`, date: l.last_sub });
     if (l.referred_closure > 0) out.push({ ...base, metric: "Referred Closure", metricKey: "CLOSURE", status: `${l.referred_closure} closure`, date: "" });
     if (l.last_sub) out.push({ ...base, metric: "Recent Submitter", metricKey: "RECENT", status: l.last_sub, date: l.last_sub });
+  }
+  for (const pending of pendingRows) {
+    out.push({ name: pending.name, email: pending.email, programme: pending.programme,
+      metric: "Pending Marking", metricKey: "PENDING", status: `${pending.pending_count} pending`,
+      pendingCount: pending.pending_count, date: pending.oldest_pending?.slice(0, 10) ?? "" });
   }
   return out;
 }
@@ -186,14 +195,209 @@ const cellStyle = {
   color: "var(--color-text-secondary)", whiteSpace: "nowrap",
 } as const;
 
-export default function MetricBreakdownTable({ learners, reviewRows, initialMetric = "ALL", coachName }: { learners: DrillLearnerRow[]; reviewRows: ReviewRow[]; initialMetric?: string; coachName?: string }) {
+type TimelineStatus = {
+  icon: string;
+  label: string;
+  color: string;
+  background: string;
+  border: string;
+};
+
+function timelineStatus(status: string): TimelineStatus {
+  const normalized = (status || "").toLowerCase();
+  if (normalized === "planned" || normalized === "not scheduled" || !normalized) {
+    return { icon: "ri-calendar-line", label: "Planned", color: "#52607A", background: "#EEF2F6", border: "#AAB7C7" };
+  }
+  if (normalized === "completed") {
+    return { icon: "ri-checkbox-circle-line", label: "Attended", color: "#087443", background: "#DDF8E9", border: "#8BE5B1" };
+  }
+  if (normalized === "scheduled") {
+    return { icon: "ri-calendar-schedule-line", label: "Scheduled", color: "#A45D00", background: "#FFF0C8", border: "#F2C969" };
+  }
+  if (normalized.includes("awaiting")) {
+    return { icon: "ri-file-edit-line", label: "Awaiting signatures", color: "#6840B8", background: "#EEE7FF", border: "#C9B5FF" };
+  }
+  if (normalized.includes("progress")) {
+    return { icon: "ri-play-circle-line", label: "In progress", color: "#007A9C", background: "#DDF7FC", border: "#82DCEB" };
+  }
+  if (normalized.includes("reschedul")) {
+    return { icon: "ri-refresh-line", label: "Rescheduled", color: "#B65313", background: "#FFE8D9", border: "#F1B28C" };
+  }
+  if (normalized.includes("cancel")) {
+    return { icon: "ri-forbid-2-line", label: "Cancelled", color: "#6B7280", background: "#F1F3F5", border: "#D4D8DE" };
+  }
+  if (normalized.includes("archive")) {
+    return { icon: "ri-archive-line", label: "Archived", color: "#6B7280", background: "#F1F3F5", border: "#D4D8DE" };
+  }
+  if (normalized.includes("miss")) {
+    return { icon: "ri-close-circle-line", label: "Missed", color: "#C73737", background: "#FFE3E3", border: "#FF9D9D" };
+  }
+  return { icon: "ri-more-line", label: normalized === "not scheduled" ? "Planned" : (status || "Planned"), color: "#667085", background: "#F1F3F5", border: "#D4D8DE" };
+}
+
+function formatMeetingDate(value: string) {
+  if (!value) return "—";
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
+
+function learnerInitials(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
+}
+
+function ReviewTrend({ rows, learners, includeAllLearners, metric }: { rows: MetricRow[]; learners: DrillLearnerRow[]; includeAllLearners: boolean; metric: "PR" | "MCM" }) {
+  const learnerDetails = useMemo(() => {
+    const byKey = new Map<string, DrillLearnerRow>();
+    for (const learner of learners) {
+      byKey.set(learner.email.toLowerCase(), learner);
+      byKey.set(learner.name.toLowerCase(), learner);
+    }
+    return byKey;
+  }, [learners]);
+
+  const learnerRows = useMemo(() => {
+    const grouped = new Map<string, MetricRow[]>();
+    if (includeAllLearners) {
+      for (const learner of learners) {
+        grouped.set((learner.email || learner.name).toLowerCase(), []);
+      }
+    }
+    for (const row of rows) {
+      const key = (row.email || row.name).toLowerCase();
+      const current = grouped.get(key) ?? [];
+      current.push(row);
+      grouped.set(key, current);
+    }
+    return Array.from(grouped.entries())
+      .map(([key, meetingRows]) => ({
+        key,
+        meetingRows: meetingRows.slice().sort((a, b) => (a.slot ?? 999) - (b.slot ?? 999) || a.date.localeCompare(b.date)),
+      }))
+      .sort((a, b) => {
+        const aName = a.meetingRows[0]?.name || learnerDetails.get(a.key)?.name || "";
+        const bName = b.meetingRows[0]?.name || learnerDetails.get(b.key)?.name || "";
+        return aName.localeCompare(bName);
+      });
+  }, [rows, learners, includeAllLearners, learnerDetails]);
+
+  const columnCount = Math.max(12, ...learnerRows.flatMap(({ meetingRows }) => meetingRows.map((row) => row.slot ?? 0)), ...learnerRows.map(({ meetingRows }) => meetingRows.length), 0);
+  const gridTemplateColumns = `280px repeat(${columnCount}, minmax(92px, 1fr))`;
+  const slotDates = Array.from({ length: columnCount }, (_, index) => {
+    const dates = Array.from(new Set(
+      learnerRows
+        .map(({ meetingRows }) => meetingRows.find((row) => row.slot === index + 1)?.date || "")
+        .filter(Boolean),
+    ));
+    return dates.length > 0 ? formatMeetingDate(dates[0]) : "—";
+  });
+
+  return (
+    <div style={{ border: "1px solid var(--color-border)", borderRadius: "var(--radius-lg)", overflow: "hidden", background: "var(--color-surface)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: "1px solid var(--color-border)", background: "var(--color-canvas)" }}>
+        <h3 style={{ margin: 0, fontSize: "var(--text-md)", color: "var(--color-text-primary)" }}>Learner × {metric === "MCM" ? "monthly coaching meeting" : "progress review"}</h3>
+        <span style={{ padding: "3px 8px", borderRadius: 999, background: "#F1EDFF", color: "#5B36B7", fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}>
+          {columnCount} {metric} columns
+        </span>
+        <span style={{ marginLeft: "auto", color: "var(--color-text-muted)", fontSize: 11, whiteSpace: "nowrap" }}>Scroll sideways for all months →</span>
+      </div>
+
+      <div className="table-scroll themed-scrollbar" style={{ overflow: "auto", maxHeight: "70vh" }}>
+        <div style={{ minWidth: `calc(280px + ${columnCount} * 92px)` }}>
+          <div style={{ display: "grid", gridTemplateColumns, minHeight: 52, borderBottom: "1px solid var(--color-border)", background: "#FAFAF8" }}>
+            <div style={{ padding: "13px 14px", color: "#52607A", fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", borderRight: "1px solid var(--color-border)" }}>
+              Learner · progress · next
+            </div>
+            {Array.from({ length: columnCount }, (_, index) => (
+              <div key={index} style={{ textAlign: "center", padding: "10px 4px 7px", borderRight: "1px solid #ECEBE7" }}>
+                <div style={{ fontFamily: "monospace", fontSize: 11, fontWeight: 700, color: "#25324D" }}>{metric} {index + 1}</div>
+                <div style={{ fontSize: 10, color: "#8A94A8", marginTop: 3, whiteSpace: "nowrap" }}>{slotDates[index]}</div>
+              </div>
+            ))}
+          </div>
+
+          {learnerRows.length === 0 ? (
+            <div style={{ padding: "var(--space-6)", textAlign: "center", color: "var(--color-text-muted)", fontSize: "var(--text-sm)" }}>No {metric} reviews match these filters.</div>
+          ) : learnerRows.map(({ key, meetingRows }) => {
+            const first = meetingRows[0];
+            const detail = learnerDetails.get(key);
+            const learnerName = first?.name || detail?.name || "Unknown learner";
+            const learnerProgramme = first?.programme || detail?.programme || "—";
+            const attended = meetingRows.filter((row) => row.status === "Completed").length;
+            const progress = Math.min(100, Math.round((attended / Math.max(columnCount, 1)) * 100));
+            return (
+              <div key={key} style={{ display: "grid", gridTemplateColumns, minHeight: 118, borderBottom: "1px solid #ECEBE7", background: "var(--color-surface)" }}>
+                <div style={{ padding: "12px 14px", borderRight: "1px solid var(--color-border)", minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+                    <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, borderRadius: "50%", background: "#E7EEFF", border: "1px solid #B7CBF8", color: "#244D9C", fontSize: 11, fontWeight: 700, flex: "0 0 auto" }}>{learnerInitials(learnerName)}</span>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, color: "var(--color-text-primary)", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{learnerName}</div>
+                      <div style={{ color: "var(--color-text-secondary)", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{learnerProgramme}</div>
+                    </div>
+                  </div>
+                  <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ height: 4, flex: 1, background: "#E3E4E7", borderRadius: 99, overflow: "hidden" }}><div style={{ width: `${progress}%`, height: "100%", background: "#3D61AF", borderRadius: 99 }} /></div>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#25324D", whiteSpace: "nowrap" }}>{attended}/{columnCount}</span>
+                  </div>
+                  <div style={{ marginTop: 7, color: "#78849B", fontSize: 10 }}>
+                    {meetingRows.find((row) => row.status !== "Completed") ? `Next: ${formatMeetingDate(meetingRows.find((row) => row.status !== "Completed")?.date || "")}` : "All recorded meetings attended"}
+                  </div>
+                </div>
+
+                {Array.from({ length: columnCount }, (_, index) => {
+                  const meeting = meetingRows.find((row) => row.slot === index + 1) || (meetingRows.every((row) => row.slot == null) ? meetingRows[index] : undefined);
+                  if (!meeting) {
+                    return <div key={index} style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, borderRight: "1px solid #F0EFEC", color: "#52607A", background: "#FAFAFA" }}><div style={{ width: 42, height: 42, borderRadius: "50%", border: "2px solid #AAB7C7", background: "#EEF2F6", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 19 }}><i className="ri-calendar-line" aria-hidden="true" /></div><span style={{ fontSize: 10 }}>Planned</span></div>;
+                  }
+                  const visual = timelineStatus(meeting.status);
+                  return (
+                    <div key={index} style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, borderRight: "1px solid #F0EFEC", minWidth: 0 }}>
+                      <div style={{ position: "absolute", left: 0, right: 0, top: "50%", height: 1, background: "#E5E7EB", zIndex: 0 }} />
+                      <div style={{ position: "relative", zIndex: 1, color: visual.color, fontSize: 11, background: "var(--color-surface)", padding: "0 4px" }}>{formatMeetingDate(meeting.date)}</div>
+                      <div style={{ position: "relative", zIndex: 1, width: 40, height: 40, borderRadius: "50%", border: `2px solid ${visual.border}`, background: visual.background, display: "flex", alignItems: "center", justifyContent: "center", color: visual.color, fontSize: 19, fontWeight: 700, boxShadow: `0 0 0 5px ${visual.background}` }}><i className={visual.icon} aria-hidden="true" /></div>
+                      <div style={{ position: "relative", zIndex: 1, color: visual.color, background: "var(--color-surface)", padding: "0 3px", fontSize: 10, whiteSpace: "nowrap" }}>{visual.label}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "center", padding: "9px 14px", borderTop: "1px solid #ECEBE7", background: "#FCFCFB", color: "#718096", fontSize: 10 }}>
+            {[
+              ["Planned", "#52607A"],
+              ["Scheduled", "#C27A00"],
+              ["In Progress", "#4D75AA"],
+              ["Awaiting signatures", "#7A4DCE"],
+              ["Attended", "#41A86F"],
+              ["Missed", "#D85D66"],
+            ].map(([label, color]) => (
+              <span key={label} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+                <span style={{ width: 7, height: 7, borderRadius: "50%", background: color, display: "inline-block" }} />
+                {label}
+              </span>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function MetricBreakdownTable({ learners, reviewRows, pendingRows, initialMetric = "ALL", coachName }: { learners: DrillLearnerRow[]; reviewRows: ReviewRow[]; pendingRows: PendingMarkingRow[]; initialMetric?: string; coachName?: string }) {
   const today = useMemo(() => {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
     return d;
   }, []);
 
-  const allRows = useMemo(() => buildRows(learners, reviewRows), [learners, reviewRows]);
+  const allRows = useMemo(() => buildRows(learners, reviewRows, pendingRows), [learners, reviewRows, pendingRows]);
 
   const programmes = useMemo(() => {
     const set = new Set<string>();
@@ -207,6 +411,7 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
   const [period, setPeriod] = useState("ALL");
   const [search, setSearch] = useState("");   // free-text learner name/email filter
   const [dateFilter, setDateFilter] = useState(""); // exact meeting/review date
+  const [monthFilter, setMonthFilter] = useState(""); // calendar month in YYYY-MM format
   // Column sort — null means natural (unsorted) order.
   const [sort, setSort] = useState<{ key: string; dir: "asc" | "desc" } | null>(null);
 
@@ -217,6 +422,7 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
     setStatus("ALL");
     setPeriod("ALL");
     setDateFilter("");
+    setMonthFilter("");
     setSort(null);
   }, [initialMetric]);
 
@@ -225,6 +431,7 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
     setStatus("ALL");
     setPeriod("ALL");
     setDateFilter("");
+    setMonthFilter("");
     setSort(null);   // columns differ between OTJH and the other metrics
   };
 
@@ -253,6 +460,7 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
       // Time period only constrains dated PR/MCM rows.
       if (reviewMode && periodMonths != null && !withinPeriod(r.date, today, periodMonths)) return false;
       if (dateFilter && r.date !== dateFilter) return false;
+      if (monthFilter && !r.date.startsWith(monthFilter)) return false;
       // Free-text search matches the learner name or email.
       if (query && !`${r.name} ${r.email}`.toLowerCase().includes(query)) return false;
       return true;
@@ -271,7 +479,7 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
         : String(av).localeCompare(String(bv));
       return sort.dir === "asc" ? diff : -diff;
     });
-  }, [allRows, metric, programme, status, period, dateFilter, search, statusMode, reviewMode, today, sort]);
+  }, [allRows, metric, programme, status, period, dateFilter, monthFilter, search, statusMode, reviewMode, today, sort]);
 
   const tableRef = useRef<HTMLTableElement>(null);
   const [exporting, setExporting] = useState(false);
@@ -315,6 +523,7 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
         statusMode && status !== "ALL" ? `Status: ${status}` : null,
         reviewMode && period !== "ALL" ? `Period: ${PERIODS.find((p) => p.key === period)?.label}` : null,
         dateFilter ? `Date: ${dateFilter}` : null,
+        monthFilter ? `Month: ${monthFilter}` : null,
         search.trim() ? `Search: "${search.trim()}"` : null,
       ].filter(Boolean);
       const subtitle = `${rows.length} row${rows.length === 1 ? "" : "s"} · ${filterBits.join(" · ")} · Exported ${new Date().toLocaleString()}`;
@@ -431,7 +640,9 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
             Metric Breakdown
           </h2>
           <p style={{ margin: "2px 0 0", fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
-            {rows.length} row{rows.length === 1 ? "" : "s"}
+            {metric === "PENDING"
+              ? `${rows.reduce((sum, row) => sum + (row.pendingCount ?? 0), 0)} pending submissions across ${rows.length} learners`
+              : `${rows.length} row${rows.length === 1 ? "" : "s"}`}
           </p>
         </div>
 
@@ -477,13 +688,25 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
           </label>
 
           <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
-            Date
+            Day
             <input
               type="date"
               value={dateFilter}
               onChange={(e) => setDateFilter(e.target.value)}
               aria-label="Filter by meeting or review date"
               title="Filter by meeting or review date"
+              style={{ ...selectStyle, minWidth: 140, cursor: "pointer" }}
+            />
+          </label>
+
+          <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
+            Month
+            <input
+              type="month"
+              value={monthFilter}
+              onChange={(e) => setMonthFilter(e.target.value)}
+              aria-label="Filter by meeting or review month"
+              title="Filter by meeting or review month"
               style={{ ...selectStyle, minWidth: 140, cursor: "pointer" }}
             />
           </label>
@@ -508,7 +731,7 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
               Status
               <select value={status} onChange={(e) => setStatus(e.target.value)} style={selectStyle}>
                 <option value="ALL">All statuses</option>
-                {statusOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+                {statusOptions.map((s) => <option key={s} value={s}>{s === "Not Scheduled" ? "Planned" : s}</option>)}
               </select>
             </label>
           )}
@@ -548,6 +771,14 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
         </div>
       </div>
 
+      {metric === "MCM" || metric === "PR" ? (
+        <ReviewTrend
+          rows={rows}
+          learners={learners}
+          metric={metric}
+          includeAllLearners={status === "ALL" && programme === "ALL" && period === "ALL" && !search.trim() && !dateFilter && !monthFilter}
+        />
+      ) : (
       <div className="table-scroll themed-scrollbar" style={{ maxHeight: "70vh", overflow: "auto" }}>
         <table className="data-table" ref={tableRef}>
           <thead>
@@ -631,6 +862,7 @@ export default function MetricBreakdownTable({ learners, reviewRows, initialMetr
           </tbody>
         </table>
       </div>
+      )}
     </div>
   );
 }

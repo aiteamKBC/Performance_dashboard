@@ -1,4 +1,4 @@
-"""Read-only LMS OTJH projection rules, vendored from LMS_v2 (2026-10-28).
+"""Read-only LMS OTJH projection rules, vendored from LMS_v2 (2026-11-08).
 
 These are the dependency-free functions used by canonical_learning.otjh_summary_bulk.
 Keep behaviour in step with that source; see test_lms_otjh.py and
@@ -272,8 +272,13 @@ def stamp(value):
     return (value if value.tzinfo else value.replace(tzinfo=uk)).astimezone(uk)
 
 def native_key(record):
-    # Match the existing native quiz identity; never cross learner ownership.
-    return (record.get('learner_id'), str(record['quiz_ref'])) if record.get('quiz_ref') else None
+    if record.get('kind') == 'quiz_reading':
+        return None
+    if record.get('quiz_ref'):
+        return (record.get('learner_id'), str(record['quiz_ref']))
+    if record.get('component_ref'):
+        return (record.get('learner_id'), 'component', str(record['component_ref']))
+    return None
 
 def native_choices(baseline, candidates):
     groups = {}
@@ -283,60 +288,42 @@ def native_choices(baseline, candidates):
             groups.setdefault(key, []).append(record)
     replacements = {}
     for key, rows in groups.items():
-        if not any(metadata(row).get('retakeTimeChoice') for row in rows):
+        if any((row.get('component_type') == 'assignment' for row in rows)):
             continue
-        selected = latest = None
-        explicit = False
-        for row in sorted(rows, key=lambda item: (str(item.get('submitted_at') or ''), str(item['id']))):
-            if row.get('accepted') is not True or row.get('passed') is False or row.get('actual_seconds') is None:
-                continue
-            mode = metadata(row).get('retakeTimeChoice')
-            if mode in ('keep', 'new'):
-                explicit = True
-                latest = row
-                if mode == 'new' or selected is None:
-                    selected = row
-            elif not explicit:
-                if selected is None or (row['actual_seconds'], str(row.get('submitted_at') or '')) >= (
-                        selected['actual_seconds'], str(selected.get('submitted_at') or '')):
-                    selected = row
-        if not explicit or selected is None:
+        if not any((metadata(row).get('retakeTimeChoice') for row in rows)):
             continue
-        end = stamp(selected.get('declared_completed_at') or selected.get('reporting_ended_at')
-                    or selected.get('submitted_at'))
+        eligible = [row for row in sorted(rows, key=lambda item: attempt_order(item.get('submitted_at'), item['id'])) if row.get('accepted') is True and row.get('passed') is not False and (row.get('actual_seconds') is not None)]
+        explicit = any((metadata(row).get('retakeTimeChoice') in ('keep', 'new', 'correct', 'add', 'retry') for row in eligible))
+        if not explicit or not eligible:
+            continue
+        selected, seconds = selected_attempt([{**row, 'seconds': row['actual_seconds'], 'mode': metadata(row).get('retakeTimeChoice')} for row in eligible], default='retry' if any((metadata(row).get('retakeTimeChoice') in ('correct', 'add', 'retry') for row in eligible)) else 'latest')
+        latest = eligible[-1]
+        end = stamp(selected.get('declared_completed_at') or selected.get('reporting_ended_at') or selected.get('submitted_at'))
         start = stamp(selected.get('started_at') or selected.get('reporting_started_at'))
         label = selected.get('reporting_timestamp_label') or ''
         if end:
             label = end.strftime('%H:%M:%S')
-            if start and start.date() == end.date() and start.timestamp() < end.timestamp():
+            if start and start.date() == end.date() and (start.timestamp() < end.timestamp()):
                 label = f'{start:%H:%M:%S} - {end:%H:%M:%S}'
             else:
                 start = None
-        replacements[key] = {**latest, 'actual_seconds': selected['actual_seconds'],
-            'reporting_month': end.strftime('%Y-%m') if end else selected.get('reporting_month'),
-            'reporting_started_at': start, 'reporting_ended_at': end,
-            'reporting_timestamp_label': label, 'retake_timing_applied': True,
-            'completion_reporting_date': end.date().isoformat() if end else None,
-            'retake_superseded_ids': [str(row['id']) for row in rows if row['id'] != latest['id']]}
+        replacements[key] = {**latest, 'actual_seconds': seconds, 'reporting_month': end.strftime('%Y-%m') if end else selected.get('reporting_month'), 'reporting_started_at': start, 'reporting_ended_at': end, 'reporting_timestamp_label': label, 'retake_timing_applied': True, 'completion_reporting_date': end.date().isoformat() if end else None, 'retake_superseded_ids': [str(row['id']) for row in rows if row['id'] != latest['id']]}
     return [row for row in baseline if native_key(row) not in replacements] + list(replacements.values())
 
 def measured_choice(candidates, has_accepted_history=False):
     """Keep the currently selected successful local attempt across later retakes."""
     selected = None
     replace_history = False
-    explicit = False
-    for row in sorted(candidates, key=lambda item: (str(item['timing'].get('submittedAt') or ''), str(item['id']))):
+    for row in sorted(candidates, key=lambda item: attempt_order(item['timing'].get('submittedAt'), item['id'])):
         mode = row['timing'].get('retakeTimeChoice')
         if mode in ('keep', 'new'):
-            explicit = True
             if mode == 'new':
-                selected, replace_history = row, True
-            elif selected is None and not has_accepted_history:
+                selected, replace_history = (row, True)
+            elif selected is None and (not has_accepted_history):
                 selected = row
-        elif not explicit and (selected is None or (row['timing']['verifiedSeconds'], str(row['id'])) > (
-                selected['timing']['verifiedSeconds'], str(selected['id']))):
+        else:
             selected = row
-    return selected, replace_history
+    return (selected, replace_history)
 
 # From learner_api/current_learning.py
 
@@ -372,7 +359,7 @@ def actual_time_seconds(value):
                 hours = int(hours_text)
                 minutes = int(minutes_text)
                 seconds = float(seconds_text)
-                if not 0 <= minutes < 60 or not isfinite(seconds) or not 0 <= seconds < 60:
+                if not 0 <= minutes < 60 or not isfinite(seconds) or (not 0 <= seconds < 60):
                     return None
                 return hours * 3600 + minutes * 60 + seconds
             return None
@@ -387,23 +374,16 @@ def is_unsynchronised_direct_save(record):
     Imported/normalised seconds (including zero) and reporting segments remain
     authoritative, so those rows are never unsynchronised.
     """
-    return (record.get('component_link_source') in {'direct', 'quiz_ref'}
-            and not record.get('source_system') and record.get('actual_seconds') is None
-            and not record.get('segments'))
+    return record.get('component_link_source') in {'direct', 'quiz_ref'} and (not record.get('source_system')) and (record.get('actual_seconds') is None) and (not record.get('segments'))
 
 def project_current(records, markings):
     """Project unsynchronised direct saves using the existing time/pass rules.
 
     Planned duration is never substituted for recorded time.
     """
-    result, native, candidates = [], {}, []
+    result, native, candidates = ([], {}, [])
     retained = {source_reference(p) for p in records if p.get('source_system')}
-    # A staff hours correction is scoped to one activity. Retain every attempt
-    # as evidence, but do not add native attempt time to the corrected ledger
-    # allocation. No other activity's dedupe policy changes.
-    manual_keys = {(p.get('learner_id'), p.get('component_ref')) for p in records
-                   if p.get('actual_basis') == 'staff:module-progress'
-                   and p.get('actual_seconds') is not None and p.get('component_ref')}
+    manual_keys = {(p.get('learner_id'), p.get('component_ref')) for p in records if p.get('actual_basis') == 'staff:module-progress' and p.get('actual_seconds') is not None and p.get('component_ref')}
     for original in records:
         p = dict(original)
         if not is_unsynchronised_direct_save(p):
@@ -427,15 +407,15 @@ def project_current(records, markings):
             marked_seconds = actual_time_seconds(marking.get('actual_time_hours')) if marking else None
             if marked_seconds is not None:
                 seconds = marked_seconds
-        p.update(accepted=accepted, completed=accepted, actual_seconds=seconds,
-                 reporting_month=at.strftime('%Y-%m'), reporting_started_at=at,
-                 reporting_ended_at=at, activity_status='Completed' if accepted else 'Submitted')
+        p.update(accepted=accepted, completed=accepted, actual_seconds=seconds, reporting_month=at.strftime('%Y-%m'), reporting_started_at=at, reporting_ended_at=at, activity_status='Completed' if accepted else 'Submitted')
         candidates.append(p)
-        # Same component/quiz retries are one activity, not extra earned hours.
-        key = ('quiz', p['quiz_ref']) if p.get('quiz_ref') else ('component', component) if component else ('entry', p['id'])
+        if p.get('quiz_ref') and p.get('kind') == 'quiz_reading':
+            key = ('quiz-reading', p['id'])
+        else:
+            key = ('quiz', p['quiz_ref']) if p.get('quiz_ref') else ('component', component) if component else ('entry', p['id'])
+        key = (p.get('learner_id'), *key)
         previous = native.get(key)
-        if previous is None or (accepted, seconds, str(at), str(p['id'])) > (
-                previous['accepted'], previous['actual_seconds'], str(previous['reporting_ended_at']), str(previous['id'])):
+        if previous is None or (accepted, seconds, attempt_order(p['submitted_at'], p['id'])) > (previous['accepted'], previous['actual_seconds'], attempt_order(previous['submitted_at'], previous['id'])):
             native[key] = p
     return native_choices(result + list(native.values()), candidates)
 
@@ -452,12 +432,10 @@ def merge_attempts(records, attempts):
     """Project completion and independently verified local time beside history."""
     result = [dict(p) for p in records]
     superseded = set()
-    # One record can be reached through several lineage links. Index positions,
-    # preserving original row order and merging each matching row only once.
     by_route = {}
     for index, p in enumerate(result):
         source_ref = source_reference(p)
-        routes, typed_courses = set(), set()
+        routes, typed_courses = (set(), set())
         for link in [*(p.get('sources') or []), *(p.get('historical_components') or [])]:
             if link.get('source_system') == 'old_lms':
                 course = str(link.get('source_course_ref'))
@@ -465,37 +443,28 @@ def merge_attempts(records, attempts):
                 activity = link.get('source_activity_id')
                 if isinstance(activity, str):
                     if activity.startswith('material:'):
-                        routes.add(f"la:{course}:{activity[9:]}")
+                        routes.add(f'la:{course}:{activity[9:]}')
                     elif activity.startswith('quiz:'):
-                        routes.add(f"subject:quiz:{course}:{activity[5:]}")
-        # Typed lineage overrides a historical untyped reference for that
-        # course only. A quiz and a material can share the same numeric id.
+                        routes.add(f'subject:quiz:{course}:{activity[5:]}')
         if isinstance(source_ref, str):
             parts = source_ref.split(':')
-            course = (parts[1] if len(parts) == 3 and parts[0] == 'la' else
-                      parts[2] if len(parts) == 4 and parts[:2] == ['subject', 'quiz'] else None)
+            course = parts[1] if len(parts) == 3 and parts[0] == 'la' else parts[2] if len(parts) == 4 and parts[:2] == ['subject', 'quiz'] else None
             if course is not None and course not in typed_courses:
                 routes.add(source_ref)
         for route in routes:
             by_route.setdefault(route, []).append(index)
     for attempt in attempts:
         catalogue_kind = attempt.get('catalogue_kind', 'material')
-        ref = f"{'la' if catalogue_kind == 'material' else 'subject:quiz'}:{attempt['group_id']}:{attempt['activity_id']}"
-        route = {'source_system': 'old_lms', 'source_course_ref': str(attempt['group_id']),
-                 'source_activity_id': f"{catalogue_kind}:{attempt['activity_id']}"}
+        ref = f"{('la' if catalogue_kind == 'material' else 'subject:quiz')}:{attempt['group_id']}:{attempt['activity_id']}"
+        route = {'source_system': 'old_lms', 'source_course_ref': str(attempt['group_id']), 'source_activity_id': f"{catalogue_kind}:{attempt['activity_id']}"}
         matches = [result[index] for index in by_route.get(ref, ())]
         has_progress_record = bool(matches)
         if not matches:
             at = instant(attempt['submitted_at'])
-            record_id = (f"subject:{attempt['group_id']}:{attempt['activity_id']}" if catalogue_kind == 'material'
-                         else f"subject:quiz:{attempt['group_id']}:{attempt['activity_id']}")
-            matches = [{'id': record_id,
-                'component_title': attempt.get('title'), 'kind': 'quiz', 'accepted': False,
-                'actual_seconds': None, 'ksbs': [], 'sources': [route], 'segments': [],
-                'source_payload': {'original_source_ref': ref},
-                'reporting_month': at.strftime('%Y-%m'), 'reporting_started_at': at}]
+            record_id = f"subject:{attempt['group_id']}:{attempt['activity_id']}" if catalogue_kind == 'material' else f"subject:quiz:{attempt['group_id']}:{attempt['activity_id']}"
+            matches = [{'id': record_id, 'component_title': attempt.get('title'), 'kind': 'quiz', 'accepted': False, 'actual_seconds': None, 'ksbs': [], 'sources': [route], 'segments': [], 'source_payload': {'original_source_ref': ref}, 'reporting_month': at.strftime('%Y-%m'), 'reporting_started_at': at}]
             result.extend(matches)
-            by_route.setdefault(ref,[]).append(len(result)-1)
+            by_route.setdefault(ref, []).append(len(result) - 1)
         for p in matches:
             p['completed'] = bool(p.get('completed', p.get('accepted')) or attempt['completed'])
             if attempt.get('best_percent') is not None:
@@ -503,9 +472,8 @@ def merge_attempts(records, attempts):
                 old = float(p['achieved_score']) / float(maximum) * 100 if maximum and p.get('achieved_score') is not None else None
                 p['achieved_score'] = max(float(attempt['best_percent']), old) if old is not None else float(attempt['best_percent'])
                 p['total_score'] = 100
-        measured = measured_attempt_record(attempt, route, has_accepted_history=any(
-            p.get('accepted') is True and p.get('actual_seconds') is not None for p in matches))
-        if measured and not any(str(p['id']) == measured['id'] for p in result):
+        measured = measured_attempt_record(attempt, route, has_accepted_history=any((p.get('accepted') is True and p.get('actual_seconds') is not None for p in matches)))
+        if measured and (not any((str(p['id']) == measured['id'] for p in result))):
             if measured.pop('retake_replace_existing', False):
                 measured['retake_superseded_ids'] = [str(p['id']) for p in matches if p.get('id')]
                 measured['ksbs'] = sorted({code for old in matches for code in old.get('ksbs', [])})
@@ -513,17 +481,15 @@ def merge_attempts(records, attempts):
                 measured['total_score'] = 100
                 for field in ('module_ref', 'module_title', 'group_ref', 'group_title'):
                     measured[field] = next((old[field] for old in matches if old.get(field)), None)
-                superseded.update(str(old['id']) for old in matches)
+                superseded.update((str(old['id']) for old in matches))
                 measured['hours_only'] = False
             else:
                 measured['hours_only'] = has_progress_record
-            # Additional time for an existing activity is evidence, not another
-            # activity in programme/recorded-course completion denominators.
             result.append(measured)
     return [record for record in result if str(record['id']) not in superseded]
 
 def measured_attempt_record(attempt, route, *, has_accepted_history=False):
-    """One best completed local duration per placement, as for native saves.
+    """One selected completed local duration per placement, as for native saves.
 
     Untimed historical attempts contribute no hours. Keep this row separate
     from audited source time, and give retries/re-reads a stable identity.
@@ -534,9 +500,8 @@ def measured_attempt_record(attempt, route, *, has_accepted_history=False):
         saved_attempts = json.loads(saved_attempts)
     for saved in saved_attempts:
         timing = saved.get('timing') or {}
-        seconds = timing.get('verifiedSeconds')
-        if (saved.get('completed') is True and timing.get('version') == 1
-                and isinstance(seconds, int) and not isinstance(seconds, bool) and seconds >= 0):
+        seconds = measured_seconds(timing)
+        if saved.get('completed') is True and seconds is not None:
             candidates.append(saved)
     if not candidates:
         return None
@@ -548,13 +513,7 @@ def measured_attempt_record(attempt, route, *, has_accepted_history=False):
     if at is None:
         return None
     ident = f"subject:timing:{attempt['group_id']}:{attempt.get('catalogue_kind', 'material')}:{attempt['activity_id']}"
-    return {'id': ident, 'component_title': attempt.get('title'),
-        'kind': 'quiz' if attempt.get('catalogue_kind') == 'quiz' else 'component',
-        'accepted': True, 'completed': True, 'actual_seconds': timing['verifiedSeconds'],
-        'actual_basis': 'legacy_activity_verified_timer', 'ksbs': [], 'sources': [route], 'segments': [],
-        'retake_replace_existing': replace_history,
-        'reporting_month': at.strftime('%Y-%m'), 'reporting_started_at': at, 'reporting_ended_at': at,
-        'source_payload': {'original_source_ref': ident, 'subject_attempt_id': str(saved['id']), 'studyTime': timing}}
+    return {'id': ident, 'component_title': attempt.get('title'), 'kind': 'quiz' if attempt.get('catalogue_kind') == 'quiz' else 'component', 'accepted': True, 'completed': True, 'actual_seconds': measured_seconds(timing), 'actual_basis': 'legacy_activity_manual_time' if timing.get('timeEntrySource') == 'input' else 'legacy_activity_verified_timer', 'ksbs': [], 'sources': [route], 'segments': [], 'retake_replace_existing': replace_history, 'reporting_month': at.strftime('%Y-%m'), 'reporting_started_at': at, 'reporting_ended_at': at, 'source_payload': {'original_source_ref': ident, 'subject_attempt_id': str(saved['id']), 'studyTime': timing}}
 
 def merge_submissions(records, submissions):
     result = list(records)
@@ -562,9 +521,7 @@ def merge_submissions(records, submissions):
     components = {str(p.get('component_ref')) for p in records if p.get('component_ref')}
     retained = {source_reference(p) for p in records}
     for s in submissions:
-        if (s.get('imported') or f"reflection:{s['id']}" in retained
-                or str(s.get('progress_entry_id')) in ids
-                or (s.get('component_ref') and str(s['component_ref']) in components)):
+        if s.get('imported') or f"reflection:{s['id']}" in retained or str(s.get('progress_entry_id')) in ids or (s.get('component_ref') and str(s['component_ref']) in components):
             continue
         at = instant(s.get('submitted_at'))
         if at is None or s.get('status') == 'draft':
@@ -573,13 +530,11 @@ def merge_submissions(records, submissions):
         codes = s.get('ksb_codes') or []
         if isinstance(codes, str):
             codes = json.loads(codes)
-        result.append({'id': f"reflection:{s['id']}", 'component_title': s.get('activity_title'),
-            'component_ref': s.get('component_ref'), 'module_title': s.get('module_title'),
-            'kind': s['activity_type'], 'accepted': accepted, 'completed': accepted,
-            'actual_seconds': actual_time_seconds(s.get('actual_time_hours')),
-            'reporting_month': at.strftime('%Y-%m'), 'reporting_started_at': at,
-            'activity_status': s.get('status'), 'ksbs': codes, 'sources': [], 'segments': [],
-            'source_payload': {'original_source_ref': f"reflection:{s['id']}"}})
+        selected_month = s.get('activity_month') if s['activity_type'] == 'extra_activity' else None
+        month = selected_month if valid_activity_month(selected_month) else at.strftime('%Y-%m')
+        result.append({'id': f"reflection:{s['id']}", 'component_title': s.get('activity_title'), 'component_ref': s.get('component_ref'), 'module_title': s.get('module_title'), 'kind': s['activity_type'], 'accepted': accepted, 'completed': accepted, 'actual_seconds': actual_time_seconds(s.get('actual_time_hours')), 'reporting_month': month, 'reporting_started_at': at, 'activity_status': s.get('status'), 'ksbs': codes, 'sources': [], 'segments': [], 'source_payload': {'original_source_ref': f"reflection:{s['id']}"}})
+        if s['activity_type'] == 'extra_activity':
+            result[-1].update(actual_basis='extra_activity_input', expected_otjh=0)
     return result
 
 # From learner_api/canonical_learning.py
@@ -589,9 +544,13 @@ def progress_records_with_completion(records, current):
 
     Counts, acceptance, seconds and reporting months belong to progress entries.
     Newer attempts may still supply completion and scores for those same entries.
-    Unpersisted submissions cannot become extra accepted-hour records on a read.
+    Standalone extra activities use their saved coach decision and entered time;
+    they have no curriculum plan or separate progress save. Other submissions
+    cannot introduce additional accepted-hour records on a read.
     Server-measured, persisted legacy attempts are separate timed evidence;
     their stable placement IDs prevent retries from duplicating those hours.
+    Untimed persisted course completions also survive, but never become OTJ
+    reporting rows or accepted hours.
 
     The exception is a stored direct LMS save that nothing has given seconds
     yet: its projected time and decision are the only record of that learning,
@@ -606,14 +565,26 @@ def progress_records_with_completion(records, current):
         latest = by_id.get(str(record['id']), {})
         fields = ('completed', 'achieved_score', 'total_score')
         if is_unsynchronised_direct_save(record) or latest.get('retake_timing_applied'):
-            fields += ('accepted', 'actual_seconds', 'activity_status', 'reporting_month',
-                       'reporting_started_at', 'reporting_ended_at', 'reporting_timestamp_label',
-                       'retake_timing_applied', 'completion_reporting_date')
+            fields += ('accepted', 'actual_seconds', 'activity_status', 'reporting_month', 'reporting_started_at', 'reporting_ended_at', 'reporting_timestamp_label', 'retake_timing_applied', 'completion_reporting_date')
         result.append({**record, **{key: latest[key] for key in fields if key in latest}})
     existing = {str(record['id']) for record in records}
-    result.extend(record for record in current
-                  if record.get('actual_basis') == 'legacy_activity_verified_timer'
-                  and str(record['id']) not in existing)
+    timed_routes = {recorded_source_key(source) for record in current if record.get('actual_basis') in {'legacy_activity_verified_timer', 'legacy_activity_manual_time'} for source in record.get('sources', [])}
+    for record in current:
+        ident = str(record['id'])
+        if ident in existing:
+            continue
+        basis = record.get('actual_basis')
+        if basis in {'legacy_activity_verified_timer', 'legacy_activity_manual_time', 'extra_activity_input'}:
+            result.append({**record, 'hours_only': True} if basis == 'extra_activity_input' else record)
+        else:
+            match = re.fullmatch('subject:(quiz:)?([1-9]\\d*):([1-9]\\d*)', ident)
+            if not match or record.get('completed') is not True or record.get('accepted') is not False or (record.get('actual_seconds') is not None):
+                continue
+            route = (match[2], ('quiz:' if match[1] else 'material:') + match[3])
+            if route in timed_routes or not any((source.get('source_system') == 'old_lms' and recorded_source_key(source) == route for source in record.get('sources', []))):
+                continue
+            result.append({**record, 'completion_only': True})
+        existing.add(ident)
     return result
 
 # From learner_api/progress_transfer_policy.py
@@ -705,3 +676,89 @@ def parse_date_value(value):
             continue
     return None
 
+
+
+def choice(value, *, activity=False):
+    allowed = ('keep', 'new', 'correct', 'add', 'retry') if activity else ('keep', 'new')
+    if value is not None and value not in allowed:
+        raise ValueError('Choose whether to keep the current time or use the new attempt time.')
+    return value
+
+def combine_seconds(previous, current, mode):
+    if mode == 'add':
+        return previous + current
+    if mode == 'retry':
+        return max(previous, current)
+    if mode == 'keep':
+        return previous
+    return current
+
+def selected_attempt(rows, *, default='latest'):
+    """Rows are chronological, eligible attempts with seconds/mode fields.
+
+    Legacy keep/new selections can retain their saved date policy. Ordinary
+    retries use the larger duration, including unlabelled native attempts.
+    """
+    selected, seconds = (None, 0)
+    prefix = []
+    for row in rows:
+        if row.get('mode') in ('correct', 'add', 'retry'):
+            break
+        prefix.append(row)
+    fallback = 'latest' if default == 'retry' and any((row.get('mode') in ('keep', 'new') for row in prefix)) else default
+    for row in rows:
+        mode, current = (row.get('mode') or fallback, row['seconds'])
+        if mode in ('correct', 'add', 'retry'):
+            fallback = 'retry'
+        if selected is None:
+            selected, seconds = (row, current)
+        elif mode == 'keep' or (mode == 'retry' and seconds >= current):
+            continue
+        else:
+            seconds = combine_seconds(seconds, current, mode)
+            selected = row
+    return (selected, seconds)
+
+def attempt_order(submitted_at, ident):
+    """Order saved attempts by the real submission instant, then their stable ID."""
+    ident = str(ident)
+    submitted = stamp(submitted_at)
+    return (submitted.astimezone(ZoneInfo('UTC')) if submitted else datetime.min.replace(tzinfo=ZoneInfo('UTC')), (0, int(ident)) if ident.isdigit() else (1, ident))
+
+def measured_seconds(value):
+    """Use a saved manual selection or verified timer, never untimed history."""
+    if not isinstance(value, dict) or value.get('version') != 1:
+        return None
+    seconds = value.get('verifiedSeconds')
+    if isinstance(seconds, bool) or not isinstance(seconds, int) or seconds < 0:
+        return None
+    if value.get('timeEntrySource') == 'input':
+        seconds = value.get('selectedSeconds')
+        if isinstance(seconds, bool) or not isinstance(seconds, int) or seconds < 0:
+            return None
+    return seconds
+
+def valid_activity_month(value):
+    if not isinstance(value, str) or len(value) != 7:
+        return False
+    try:
+        date.fromisoformat(value + '-01')
+    except ValueError:
+        return False
+    return True
+
+def recorded_source_key(source):
+    """Resolve a course-qualified legacy identity only inside its stored route.
+
+    Older imports used one global material/quiz key per learner. A component
+    reused by two courses needs distinct source rows, while catalogue IDs and
+    learner-facing material links retain the original typed component ID.
+    """
+    course = str(source.get('source_course_ref') or '')
+    reference = str(source.get('source_activity_id') or '')
+    if reference.startswith('course:'):
+        match = re.fullmatch('course:([1-9]\\d*):((?:material|quiz):[1-9]\\d*)', reference)
+        if not match or source.get('source_system') != 'old_lms' or match[1] != course:
+            return None
+        reference = match[2]
+    return (course, reference)
