@@ -77,10 +77,12 @@ const toRecord = (row: CoachRowDTO, weekMeta: WeekMetaDTO[]): CoachSummaryRecord
 export const fetchAttendanceWeeks = async (
   count = 10,
   page?: { before?: string | null; after?: string | null },
+  refresh = false,
 ): Promise<AttendanceWeeksResult> => {
   const params = new URLSearchParams({ count: String(count) });
   if (page?.before) params.set('before', page.before);
   else if (page?.after) params.set('after', page.after);
+  if (refresh) params.set('refresh', '1');
   // Attendance is computed from live LMS data; never let the browser reuse a
   // previous GET response after the source data has been refreshed.
   const response = await fetch(buildApiUrl(`/api/attendance-weeks/?${params.toString()}`), {

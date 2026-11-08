@@ -233,7 +233,6 @@ export const CHART_DEFS: ChartDef[] = [
         <YAxis tick={ax} />
         <Tooltip contentStyle={ttStyle} labelStyle={ttLabel} itemStyle={ttItem} cursor={ttCursor} />
         <Legend wrapperStyle={{ fontSize: 10, color: "#6B7280", paddingTop: 8 }} />
-        <Bar dataKey="Last Week" fill={BLUE} radius={[4, 4, 0, 0]} maxBarSize={28} />
         <Bar dataKey="Pending" fill={RED} radius={[4, 4, 0, 0]} maxBarSize={28} />
       </BarChart>
     ),

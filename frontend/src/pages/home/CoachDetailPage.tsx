@@ -293,7 +293,7 @@ export default function CoachDetailPage() {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "var(--space-3)" }}>
               <KpiCard label="Total learners" value={record.totalLearners} sub="Your caseload" onClick={() => scrollToBreakdown("ALL")} />
               <KpiCard label="OTJH at risk" value={otjhCounts["At Risk"]} sub={`${otjhCounts["Need Attention"]} need attention`} onClick={() => scrollToBreakdown("OTJH")} />
-              <KpiCard label="Pending marking" value={record.pending} sub="Pending submissions" onClick={() => scrollToBreakdown("PENDING")} />
+              <KpiCard label="Pending marking" value={drill?.pending_marking_count ?? record.pending} sub="Pending submissions" onClick={() => scrollToBreakdown("PENDING")} />
               <KpiCard label="PR this week" value={drillMetricValue(drill?.pr_this_week)} sub={`Progress reviews · ${weekRangeLabel}`} onClick={() => scrollToBreakdown("PR")} />
               <KpiCard label="MCM this week" value={drillMetricValue(drill?.mcm_this_week)} sub={`Monthly coaching · ${weekRangeLabel}`} onClick={() => scrollToBreakdown("MCM")} />
               <KpiCard label="Catch-ups this week" value={drillMetricValue(drill?.catchups_this_week)} sub={`Catch-up sessions · ${weekRangeLabel}`} />
@@ -380,7 +380,7 @@ export default function CoachDetailPage() {
                     : {}),
                 }}
               >
-                <MetricBreakdownTable learners={drill.per_learner} reviewRows={drill.review_rows} initialMetric={breakdownMetric} coachName={record.coach} />
+                <MetricBreakdownTable learners={drill.per_learner} reviewRows={drill.review_rows} pendingRows={drill.pending_marking ?? []} initialMetric={breakdownMetric} coachName={record.coach} />
               </div>
             )}
           </>

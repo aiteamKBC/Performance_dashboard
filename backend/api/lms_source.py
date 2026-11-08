@@ -111,14 +111,11 @@ def _num(value):
 
 
 def _otjh_facts(cur, lms_ids):
-    """OTJH per LMS learner id, shaped like ``lms_otjh.to_date_metrics``.
+    """Canonical LMS OTJH facts per profile, including saved attempts and extras.
 
-    The LMS's own figures come from its coach dashboard snapshot (the persisted
-    canonical projection: completed, planned, target to date). Where the LMS
-    has no programme plan for a learner (it shows "Unavailable"), planned and
-    target-to-date fall back to "Learner".learner_target_hours_current and
-    completed hours to the accepted activity ledger. RAG is by hours behind
-    target: > 40 At Risk, > 20 Need Attention, otherwise On Track.
+    No stale summary-column substitution: invalid identity or missing programme
+    plan remains unavailable. Bands use rounded shortfall hours from the same
+    programme dates and accepted-hour projection as the LMS coach dashboard.
     """
     from datetime import datetime
     from zoneinfo import ZoneInfo
@@ -131,7 +128,8 @@ def _otjh_facts(cur, lms_ids):
     cur.execute(
         '''SELECT DISTINCT ON ((l->>'id')::bigint) (l->>'id')::bigint,
                   (l->>'otjhActual')::numeric, (l->>'otjhPlanned')::numeric,
-                  (l->>'otjhTargetAsOfToday')::numeric
+                  (l->>'otjhTargetAsOfToday')::numeric,
+                  l->>'otjhRagStatus'
              FROM "Coach".coach_dashboard_snapshot s
              CROSS JOIN LATERAL jsonb_array_elements(coalesce(s.payload->'learners', '[]'::jsonb)) l
             WHERE l->>'id' ~ '^[0-9]+$' AND (l->>'id')::bigint = ANY(%s)
@@ -150,7 +148,7 @@ def _otjh_facts(cur, lms_ids):
 
     out = {}
     for i in ids:
-        s_actual, s_planned, s_target = snap.get(i, (None, None, None))
+        s_actual, s_planned, s_target, s_rag = snap.get(i, (None, None, None, None))
         v_planned, v_target, v_actual = view.get(i, (None, None, None))
         from_lms = s_target is not None
         actual = _num(s_actual) if s_actual is not None else _num(v_actual)
@@ -160,6 +158,13 @@ def _otjh_facts(cur, lms_ids):
             actual = 0.0
         shortfall = round(max(target - actual, 0.0), 2) if target is not None else None
         delta = actual - target if target is not None else None
+        normalized_rag = _clean(s_rag).lower().replace('_', '-').replace(' ', '-')
+        snapshot_status = {
+            'on-track': 'On Track',
+            'need-attention': 'Need Attention',
+            'at-risk': 'At Risk',
+            'unavailable': 'Unavailable',
+        }.get(normalized_rag)
         out[i] = {
             "completed": actual, "planned": planned, "target": target,
             "progress_hours": round(delta, 2) if delta is not None else None,
@@ -167,8 +172,11 @@ def _otjh_facts(cur, lms_ids):
             "progress_percent": round(max(0.0, min(100.0, actual / target * 100)), 2)
             if delta is not None and target > 0 else None,
             "shortfall_hours": shortfall,
-            "otjh_status": ("Unavailable" if shortfall is None else "At Risk" if shortfall > 40
-                            else "Need Attention" if shortfall > 20 else "On Track"),
+            # The snapshot's RAG is the LMS coach-dashboard classification.
+            # Only derive it from hours when the snapshot does not provide one.
+            "otjh_status": (snapshot_status or
+                            ("Unavailable" if shortfall is None else "At Risk" if shortfall > 40
+                             else "Need Attention" if shortfall > 20 else "On Track")),
             "as_of": today.isoformat(),
             "source": ("lms:canonical-programme-plan-window" if from_lms
                        else "lms:learner_target_hours_current" if target is not None else "unavailable"),
@@ -235,11 +243,11 @@ def _empty():
     }
 
 
-def _coach_performance(cursor, coach_emails):
+def _coach_performance(cursor, coach_emails, caseload, as_of=None):
     """Return the LMS dashboard's authoritative card metrics by coach email.
 
     This mirrors ``coach_performance_metrics_by_coach`` in LMS_v2: attendance
-    is the engagement value, review rates come from ``Learner.reviews`` and
+    is separate from learning activity engagement; review rates come from ``Learner.reviews`` and
     OTJH bands come from the persisted coach dashboard snapshot.
     """
     emails = sorted({str(email).strip().lower() for email in coach_emails if str(email or '').strip()})
@@ -249,12 +257,7 @@ def _coach_performance(cursor, coach_emails):
     from datetime import datetime, timedelta
     from zoneinfo import ZoneInfo
 
-    as_of = datetime.now(ZoneInfo('Europe/London')).date()
-    pr_start = as_of - timedelta(weeks=12)
-    mcm_start = as_of - timedelta(weeks=4)
-    progress_types = ['progress review', 'progress review (+ skills radar)']
-    mcm_types = ['monthly coaching meeting', 'monthly coaching', 'mcm']
-    completed_statuses = ['completed', 'complete', 'finished']
+    as_of = as_of or datetime.now(ZoneInfo('Europe/London')).date()
 
     # Snapshot metrics are already the LMS UI's canonical attendance/OTJH
     # projection.  The query aggregates JSON in Postgres so full snapshots do
@@ -289,52 +292,44 @@ def _coach_performance(cursor, coach_emails):
             'otjh_at_risk': int(at_risk or 0),
         }
 
-    # Review metrics use the same learner/review rows as the LMS coach
-    # directory, scoped to active/delivery learner profiles.
-    q = '''
-        SELECT lower(l.coach_email),
-               count(r.id) FILTER (
-                   WHERE lower(trim(r.review_type)) = ANY(%s)
-                     AND coalesce(r.completed_date, r.planned_scheduled_date)::date BETWEEN %s AND %s
-               )::int,
-               count(r.id) FILTER (
-                   WHERE lower(trim(r.review_type)) = ANY(%s)
-                     AND lower(trim(r.status)) = ANY(%s)
-                     AND coalesce(r.completed_date, r.planned_scheduled_date)::date BETWEEN %s AND %s
-               )::int,
-               count(r.id) FILTER (
-                   WHERE lower(trim(r.review_type)) = ANY(%s)
-                     AND coalesce(r.completed_date, r.planned_scheduled_date)::date BETWEEN %s AND %s
-               )::int,
-               count(r.id) FILTER (
-                   WHERE lower(trim(r.review_type)) = ANY(%s)
-                     AND lower(trim(r.status)) = ANY(%s)
-                     AND coalesce(r.completed_date, r.planned_scheduled_date)::date BETWEEN %s AND %s
-               )::int
-          FROM \"Learner\".learners l
-          LEFT JOIN \"Learner\".reviews r ON r.learner_id = l.id
-         WHERE lower(trim(l.programme_status)) = ANY(%s)
-           AND lower(trim(l.coach_email)) = ANY(%s)
-         GROUP BY lower(l.coach_email)
-    '''
-    cursor.execute(q, (
-        progress_types, pr_start, as_of,
-        progress_types, completed_statuses, pr_start, as_of,
-        mcm_types, mcm_start, as_of,
-        mcm_types, completed_statuses, mcm_start, as_of,
-        ['active', 'delivery'], emails,
-    ))
-    for email, pr_required, pr_completed, mcm_required, mcm_completed in cursor.fetchall():
-        item = result.setdefault(email, {
-            'attendance_rate': None,
-            'otjh_ontrack': 0, 'otjh_need_attention': 0, 'otjh_at_risk': 0,
+    # All periods use the same LMS coach-directory review population and rules.
+    from .lms_reviews import read_review_metrics
+    for email, periods in read_review_metrics(cursor, caseload, as_of).items():
+        item = result.setdefault(email, {'attendance_rate': None})
+        item['pr_weeks'] = periods['pr_weeks']
+        item['pr_periods'] = periods['PR']
+        item['mcm_periods'] = periods['MCM']
+        for prefix, key in (('pr', '12w'), ('mcm', '4w')):
+            for field, value in periods['PR' if prefix == 'pr' else 'MCM'][key].items():
+                item[f'{prefix}_{field}'] = value
+    # Match the LMS marking card: all named owned profiles, assignment/extra
+    # activity submissions only. This queue is independent of caseload status.
+    cursor.execute('''SELECT lower(trim(l.coach_email)), l.id, l.full_name, l.email,
+               l.programme_status, count(*)::int
+        FROM "Learner".learners l
+        JOIN "Learner".learning_reflection_submissions s
+          ON s.learner_id = l.enrolment_id::text
+        WHERE lower(trim(l.coach_email)) = ANY(%s)
+          AND nullif(trim(l.full_name), '') IS NOT NULL
+          AND s.status IN ('submitted_for_tutor_review', 'escalated')
+          AND lower(trim(s.activity_type)) = ANY(%s)
+        GROUP BY lower(trim(l.coach_email)), l.id, l.full_name, l.email, l.programme_status''',
+        [emails, ['assignment', 'extra_activity']])
+    pending = {}
+    for email, identity, name, learner_email, programme_status, count in cursor.fetchall():
+        pending.setdefault(email, []).append({
+            'name': name, 'email': learner_email or '', 'lms_id': identity,
+            'detail': f'{count} pending - {programme_status or "Unknown status"}',
+            'pending_count': count,
         })
-        item.update({
-            'pr_required': int(pr_required or 0),
-            'pr_completed': int(pr_completed or 0),
-            'mcm_required': int(mcm_required or 0),
-            'mcm_completed': int(mcm_completed or 0),
-        })
+    for email in emails:
+        item = result.setdefault(email, {})
+        item['assignment_pending_learners'] = pending.get(email, [])
+        item['assignment_pending'] = sum(row['pending_count'] for row in item['assignment_pending_learners'])
+    from .lms_marking import read_marking_queue
+    for email, rows in read_marking_queue(cursor, emails).items():
+        result[email]['pending_learners'] = rows
+        result[email]['pending'] = sum(row['pending_count'] for row in rows)
     return result
 
 
@@ -347,10 +342,12 @@ def _load():
     aptem_ids, aptem_emails = _aptem_active()
 
     with psycopg.connect(dsn, connect_timeout=15, options='-c default_transaction_read_only=on') as conn, conn.cursor() as cur:
+        # All LMS metrics in one response describe one consistent database snapshot.
+        cur.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
         # Neon poolers reject statement_timeout as a startup option, but
         # accept it after the connection is established. This prevents a slow
         # LMS query from holding the dashboard request indefinitely.
-        cur.execute("SET statement_timeout = '15000ms'")
+        cur.execute("SET statement_timeout = '60000ms'")
         from .lms_caseload import read_caseload
         aptem_owners = _aptem_owners()
 
@@ -397,15 +394,13 @@ def _load():
             learner['otjh'] = canonical_by_id.get(learner['id'], {})
         try:
             performance_by_email = _coach_performance(
-                cur, [learner.get('coach_email') for learner in caseload]
+                cur, [learner.get('coach_email') for learner in caseload], caseload
             )
         except Exception:
-            # Card enrichment is supplementary to the caseload itself.  Keep
-            # the LMS population available if a stale snapshot/review table is
-            # temporarily unavailable; the caller will use caseload-safe
-            # fallbacks for the affected fields.
+            # Do not cache partial results as genuine zero review metrics.
+            # The cache retains the previous complete snapshot on failure.
             log.exception("LMS coach performance snapshot is unavailable.")
-            performance_by_email = {}
+            raise LmsDataUnavailable("LMS review metrics could not be loaded.")
         otjh_by_email = {}
 
         # A learner can have several LMS records (e.g. an old withdrawn one);
@@ -524,7 +519,7 @@ def _reload():
     try:
         data = _load()
     except Exception:
-        log.exception("Failed to load LMS learners; using Aptem data only.")
+        log.exception("Failed to load authoritative LMS metrics; retaining the last complete snapshot.")
         # Keep serving the last good snapshot if there is one.
         return _cache["data"] or _empty()
     _cache["data"], _cache["at"] = data, time.monotonic()
@@ -577,6 +572,10 @@ def get_learner_details(emails, week_start, week_end, profile_ids=None):
     Active / Delivery record. Empty on any LMS failure, so the page still
     renders.
     """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    as_of = datetime.now(ZoneInfo("Europe/London")).date()
     dsn = os.environ.get("LMS_DATABASE_URL")
     emails = sorted({_clean(e).lower() for e in emails if _clean(e)})
     profile_ids = sorted({int(i) for i in (profile_ids or []) if i is not None})
@@ -715,6 +714,21 @@ def get_learner_details(emails, week_start, week_end, profile_ids=None):
                     "canceled": "Cancelled",
                 }.get(compact, _clean(status).replace("-", " ").title() or "In Progress")
 
+            def _effective_meeting_status(event_status, review_status, meeting_date):
+                """Use the booked event, then review status, for display.
+
+                A past scheduled booking with no completion is awaiting the
+                learner/coach signature in the LMS UI, even when the calendar
+                row still says ``scheduled``. Keep completed as the strongest
+                signal, then apply that display rule to past meetings.
+                """
+                event_label = _meeting_status_label(event_status) if _clean(event_status) else ""
+                review_label = _meeting_status_label(review_status) if _clean(review_status) else ""
+                label = review_label if review_label == "Completed" else (event_label or review_label or "In Progress")
+                if label == "Scheduled" and meeting_date is not None and meeting_date < as_of:
+                    return "Awaiting Signature"
+                return label
+
             try:
                 # Load all relevant reviews for type lookup and for the
                 # unbooked-review half of the timetable aggregation.
@@ -760,18 +774,21 @@ def get_learner_details(emails, week_start, week_end, profile_ids=None):
                     if metric is None and linked_review is not None:
                         metric = review_type_to_metric.get(linked_review[2])
                     meeting_date = scheduled_date or target_date
-                    effective_status = (
-                        linked_review[4] if linked_review and linked_review[4]
-                        else status or (linked_review[4] if linked_review else "")
+                    effective_status = _effective_meeting_status(
+                        status,
+                        linked_review[4] if linked_review else "",
+                        meeting_date,
                     )
-                    if (metric and meeting_date is not None
-                            and _meeting_status_is_countable(effective_status)):
-                        if week_start <= meeting_date <= week_end:
+                    if metric and meeting_date is not None:
+                        # Keep every status in the coach trend. Only statuses
+                        # that represent a real meeting affect the KPI count.
+                        if (_meeting_status_is_countable(effective_status)
+                                and week_start <= meeting_date <= week_end):
                             review_counts[metric] += 1
                         timetable_rows.append({
                             "learner_id": learner_id,
                             "metric": metric,
-                            "status": _meeting_status_label(effective_status),
+                            "status": effective_status,
                             "date": meeting_date.isoformat(),
                         })
 
@@ -779,14 +796,15 @@ def get_learner_details(emails, week_start, week_end, profile_ids=None):
                     if int(review_id) in booked_review_ids:
                         continue
                     metric = review_type_to_metric.get(review_type)
-                    if (metric and planned_date is not None
-                            and _meeting_status_is_countable(instance_status or review_status)):
-                        if week_start <= planned_date <= week_end:
+                    effective_status = _effective_meeting_status(instance_status, review_status, planned_date)
+                    if metric and planned_date is not None:
+                        if (_meeting_status_is_countable(effective_status)
+                                and week_start <= planned_date <= week_end):
                             review_counts[metric] += 1
                         timetable_rows.append({
                             "learner_id": learner_id,
                             "metric": metric,
-                            "status": _meeting_status_label(instance_status or review_status),
+                            "status": effective_status,
                             "date": planned_date.isoformat(),
                         })
             except Exception:

@@ -4,6 +4,26 @@ import { daysSince, formatDate } from "@/utils/learners";
 
 const METRIC_LABEL: Record<string, string> = { PR: "Progress review", MCM: "Monthly coaching" };
 
+function MeetingStatusBadge({ status }: { status: string }) {
+  const normalized = status.toLowerCase();
+  const config = normalized.includes("awaiting")
+    ? { icon: "ri-file-edit-line", label: "Awaiting Signature", color: "#6840B8", background: "#EEE7FF", border: "#D2C2FF" }
+    : normalized === "completed"
+      ? { icon: "ri-checkbox-circle-line", label: "Completed", color: "#087443", background: "#DDF8E9", border: "#A4E8BF" }
+      : normalized === "scheduled"
+        ? { icon: "ri-calendar-schedule-line", label: "Scheduled", color: "#A45D00", background: "#FFF0C8", border: "#F2D486" }
+        : normalized === "not scheduled"
+          ? { icon: "ri-more-line", label: "Planned", color: "#68758A", background: "#F1F3F6", border: "#D8DDE5" }
+          : { icon: "ri-information-line", label: status || "—", color: "#52607A", background: "#F4F6F8", border: "#D9DEE6" };
+
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 11px", borderRadius: 999, border: `1px solid ${config.border}`, background: config.background, color: config.color, fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>
+      <i className={config.icon} aria-hidden="true" />
+      {config.label}
+    </span>
+  );
+}
+
 function MeetingsTable({ rows, emptyText, overdue = false }: { rows: ReviewRow[]; emptyText: string; overdue?: boolean }) {
   if (rows.length === 0) {
     return <p style={{ margin: 0, padding: "var(--space-4)", fontSize: "var(--text-sm)", color: "var(--color-text-faint)" }}>{emptyText}</p>;
@@ -37,7 +57,7 @@ function MeetingsTable({ rows, emptyText, overdue = false }: { rows: ReviewRow[]
                   <span className={r.metric === "PR" ? "badge badge--info" : "badge badge--warning"}>{r.metric}</span>{" "}
                   <span style={{ fontSize: "var(--text-xs)", color: "var(--color-text-faint)" }}>{METRIC_LABEL[r.metric]}</span>
                 </td>
-                <td>{r.status}</td>
+                <td><MeetingStatusBadge status={r.status} /></td>
               </tr>
             );
           })}

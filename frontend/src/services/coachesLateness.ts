@@ -74,12 +74,28 @@ export interface ReviewRow {
   metric: "PR" | "MCM";
   status: string;
   date: string;
+  // Original source slot when available (1-based, e.g. MCM 1).
+  slot?: number;
+}
+
+export interface PendingMarkingRow {
+  lms_id: number;
+  enrolment_id: string;
+  name: string;
+  email: string;
+  programme: string;
+  programme_status: string;
+  pending_count: number;
+  oldest_pending: string | null;
+  latest_pending: string | null;
 }
 
 export interface CoachDrill {
   coach: string;
   case_owner_id: number | null;
   per_learner: DrillLearnerRow[];
+  pending_marking: PendingMarkingRow[];
+  pending_marking_count: number;
   // The coach's learners' catch-up sessions this work week (Mon–Fri).
   catchups_this_week: number;
   week_start?: string;
@@ -270,28 +286,17 @@ export const fetchCoachesLateness = async (options?: { signal?: AbortSignal; ref
         ? toNumber(item.evidence_week_total)
         : evToday + evYesterday + evMinus2 + evMinus3 + evMinus4 + evMinus5 + evMinus6 + evMinus7;
 
-      // Per-learner required/completed per window (4w/8w/12w/all) for the
-      // home-page PR & MCM performance charts. Prefer the API's per-learner
-      // buckets (pr_bylearner / mcm_bylearner); if the backend hasn't sent them
-      // yet, fall back to the per-window numbers already used on the coaches
-      // page so the charts aren't empty ("all" ≈ the 12-week figure).
-      const periodCounts = (
-        obj: any,
-        fb: { req4: number; done4: number; req8: number; done8: number; req12: number; done12: number },
-      ) => {
-        if (obj && (obj["4w"] || obj["8w"] || obj["12w"] || obj.all)) {
-          const pick = (k: string) => ({
-            required: toNumber(obj?.[k]?.required),
-            completed: toNumber(obj?.[k]?.completed),
-          });
-          return { "4w": pick("4w"), "8w": pick("8w"), "12w": pick("12w"), all: pick("all") };
-        }
-        return {
-          "4w": { required: fb.req4, completed: fb.done4 },
-          "8w": { required: fb.req8, completed: fb.done8 },
-          "12w": { required: fb.req12, completed: fb.done12 },
-          all: { required: fb.req12, completed: fb.done12 },
+      // Canonical LMS review counts; missing data must never become a false zero.
+      const periodCounts = (obj: any) => {
+        const pick = (key: string) => {
+          const counts = obj?.[key];
+          if (!counts || !['required', 'completed', 'overdue'].every((field) =>
+            typeof counts[field] === 'number' && Number.isFinite(counts[field]))) {
+            throw new Error('LMS review metrics unavailable. Refresh the dashboard.');
+          }
+          return { required: counts.required, completed: counts.completed, overdue: counts.overdue };
         };
+        return { '4w': pick('4w'), '8w': pick('8w'), '12w': pick('12w'), all: pick('all') };
       };
 
       return {
@@ -362,16 +367,8 @@ export const fetchCoachesLateness = async (options?: { signal?: AbortSignal; ref
         prRequired12Weeks,
         prCompleted12Weeks,
         prCompletionRate12Weeks: prOverallCompletionRate,
-        prByLearner: periodCounts(item.pr_bylearner, {
-          req4: prRequired4Weeks, done4: prCompleted4Weeks,
-          req8: prRequired8Weeks, done8: prCompleted8Weeks,
-          req12: prOverallRequired, done12: prOverallCompleted,
-        }),
-        mcmByLearner: periodCounts(item.mcm_bylearner, {
-          req4: mcmRequired4Weeks, done4: mcmCompleted4Weeks,
-          req8: mcmRequired8Weeks, done8: mcmCompleted8Weeks,
-          req12: mcmRequired12Weeks, done12: mcmCompleted12Weeks,
-        }),
+        prByLearner: periodCounts(item.pr_periods),
+        mcmByLearner: periodCounts(item.mcm_periods),
         mcmRequired4Weeks,
         mcmCompleted4Weeks,
         mcmCompletionRate4Weeks,

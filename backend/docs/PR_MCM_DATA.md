@@ -1,183 +1,100 @@
-# PR & MCM Data — Sources and Computation
+# Dashboard metrics: canonical LMS sources
 
-This document describes how the **Progress Review (PR)** and **Monthly Coaching
-Meeting (MCM)** metrics on the dashboard are sourced and computed. Both are
-derived **live** (computed on each request) from raw source tables — there is no
-pre-aggregated PR/MCM table that the dashboard reads.
+The LMS loader uses a repeatable-read, read-only transaction so a refresh cannot
+mix source revisions while it computes the metrics. A cold OTJH rebuild can take
+several minutes; successful snapshots are cached for subsequent page loads.
 
-All logic lives in [`api/lateness_compute.py`](../api/lateness_compute.py).
+Cards and home analytics charts consume the same `GET /api/coaches-lateness/`
+response. Review counts are computed by `api/lms_reviews.py`; no Aptem review
+counts are used as a fallback for these cards or charts.
 
----
+## PR and MCM
 
-## 1. Source tables
+Source: `"Learner".reviews` joined to `"Learner".learners`, grouped by the current
+coach email. Each review counts once, including when one learner has multiple
+reviews. `pr_periods` and `mcm_periods` expose required, completed and overdue
+for 4w, 8w, 12w and all. Scalar card fields are aliases of these same periods.
+The legacy API names `pr_bylearner` and `mcm_bylearner` are compatibility aliases,
+not a separate per-learner calculation.
 
-Both PR and MCM come from the **default** database (`DATABASE_URL` → `neondb`),
-not the KBC attendance database. They are "wide" review tables: one row per
-learner, with many repeated columns holding successive review slots.
+Rules match `coach_performance_metrics_by_coach` in the local LMS checkout:
 
-| Metric | Table | Date columns | Status columns | Slots (`count`) |
-|--------|-------|--------------|----------------|-----------------|
-| **PR** | `progress_review` | `Review Planned Date1` … `Review Planned Date16` | `Review Status1` … `Review Status16` | 16 |
-| **MCM** | `MCR` | `MCM1` … `MCM22` | `Status1` … `Status22` | 22 |
+- Population: named profiles with an enrolment, Active/Delivery programme status.
+  This selector includes internal profiles hidden by the separate caseload filter.
+- Types: Progress Review / Progress Review (+ Skills Radar); Monthly Coaching
+  Meeting / Monthly Coaching / MCM. Other types do not count.
+- Effective date: completed_date when present, otherwise planned_scheduled_date.
+  Null dates and future dates do not count.
+- Completed: exact case-insensitive trimmed completed / complete / finished.
+- Required includes completed reviews. Overdue is incomplete AND effective date
+  before today. A review due today is outstanding but not overdue.
+- 4w/8w/12w are inclusive [today - 28/56/84 days, today], matching the LMS.
+  All dates means dates through today; it is not a 12-week approximation.
+- Today follows Europe/London, matching the LMS. Weekly PR trends use the same
+  review ledger and completion aliases.
 
-Shared identity / filter columns on both tables: `FullName`, `Email`,
-`CaseOwner`, `Status` (learner program status). `progress_review` also has
-`case_owner_id`; **`MCR` does not** — MCM owner-matching falls back to name only.
+The LMS PR card rounds its percentage to an integer; other completion-rate
+fields retain one decimal. Both use the identical numerator and denominator.
 
-Each "slot" `i` is a planned review: `<date_prefix>i` holds the planned date
-(as a `dd-mm-yyyy` / `dd/mm/yyyy` string, sometimes with extra text) and
-`<status_prefix>i` holds its status text.
+## Pending marking
 
----
+Matches the LMS Coach Dashboard **Marking list** selector, not the narrower
+coach-directory assignment counter. Source is `api/lms_marking.py`: all submission
+activity types in submitted_for_tutor_review or escalated across all named owned
+profiles, regardless of programme status. One stable enrolment maps to one profile
+per coach, matching the LMS selector; duplicate profiles cannot multiply the count.
 
-## 2. Row-level filters (applied to every learner row)
+The previous directory-only selector excluded readings, quizzes, videos, sessions,
+podcasts and slide decks. On 2026-11-08 that produced Aryan 20 instead of 35 and
+Femi 3 instead of 31. That value is now separately named `assignment_pending`
+in source enrichment; it never drives the dashboard Pending Marking KPI.
 
-A learner row is skipped entirely unless all of these pass:
+`pending_marking` detail rows and `pending_marking_count` come from the same queue
+as the coach-card total. The metric breakdown consumes this queue directly,
+including profiles outside the Active/Delivery learner table. It labels the
+weighted number of submissions separately from the number of learner rows and
+uses the actual oldest pending submission date, not an Aptem evidence date.
+No previous-week queue snapshot exists; no historical series is displayed.
 
-- `Status` (program status) is `active` (case-insensitive).
-- `Email` does **not** end in `@alfanar.com` (`_is_alfanar`).
-- `CaseOwner` is not in the `EXCLUDE` set (non-coaching owners — enrolment team,
-  admins, etc.) and is not blank (`_is_excluded_owner`).
+Run `python scripts/verify_marking_parity.py --lms-root PATH --output docs/marking_parity.json`
+to compare every coach's total, profile identity, learner name, programme, oldest
+and latest dates against the actual LMS Marking selector on one read-only snapshot.
 
-For drill-downs (single coach), the owner is additionally matched via
-`_owner_matches`: match on `case_owner_id` when both sides have one, otherwise
-case-insensitive name match.
+## Engagement, OTJH and unavailable data
 
----
+Engagement is the percentage of the visible caseload with a non-deleted LMS
+learning-progress submission in the last 30 days. It is separate from attendance.
+Cards and charts show one decimal from the same recent/total counts.
 
-## 3. Slot-level filters (applied to each review slot `i`)
+OTJH cards and charts use the same canonical LMS OTJH bands from the visible
+caseload; the independent parity tool compares the underlying LMS calculations.
+Referred closure has no LMS equivalent and is displayed as unavailable, not zero.
 
-Within a kept row, each slot is only counted if:
+Missing authoritative review/marking data fails explicitly instead of reverting
+to legacy counts or fabricating zero. The server can retain its last successful
+snapshot during a failed background refresh. Source cache is 30 seconds and the
+computed endpoint cache is 60 seconds; browser refresh requests can clear both.
 
-- The planned-date cell is non-empty.
-- It is **not** a "personal support plan" (`_is_personal_support_plan` — these
-  are excluded from PR/MCM counts).
-- The planned date parses to a real date (`_parse_review_date`, first
-  `dd-mm-yyyy` token found in the string).
+## Verification
 
----
+`api/test_lms_reviews.py` covers mixed completed/overdue reviews for one learner,
+completion aliases, rolling-window boundaries, due today, future/null dates,
+zero reviews, missing sources, weekly counts and the card/chart response contract.
 
-## 4. Status classification
+Run `python scripts/verify_review_parity.py --lms-root PATH --output docs/review_parity.json`
+from backend to compare PR 12w, MCM 4w and the separately named assignment-only counter against the actual LMS
+coach-directory function on a single repeatable-read, read-only database snapshot.
+The stored report identifies its date, reference checkout, totals and differences.
+It verifies the available database and checkout, not deployment of this dashboard.
 
-Raw status text is collapsed to one category by `_classify_status`:
+OTJH regressions also cover standalone extra activities, their selected reporting
+month, and the correct/add/retry saved-attempt choices. The OTJH reader uses the
+same complete projection selector as the current LMS, including timed saved
+attempts and transferred profiles. `verify_otjh_parity.py --lms-root PATH --output
+docs/otjh_parity.json` compares every returned OTJH fact on a read-only snapshot.
+`--limit N` is available for diagnostic samples; the saved full report states its
+actual number of checked profiles.
 
-| Category | Matched when the (lowercased) status text… |
-|----------|---------------------------------------------|
-| `Completed` | contains `completed` |
-| `Awaiting Signature` | contains `awaiting signature` |
-| `In Progress` | is empty, or matches nothing else below |
-| `Not Scheduled` | contains `notscheduled` / both `not` and `scheduled` |
-| `Scheduled` | contains `scheduled` (and not "not scheduled") |
-
-Only `Completed` counts as done. Everything else is "outstanding".
-
----
-
-## 5. Time windows
-
-`today` = server date (`date.today()`). Windows are **inclusive** and anchored
-at today, looking backward:
-
-**Rolling periods** (`PERIODS`, used for required/completed counts):
-
-| Key | Length | Range |
-|-----|--------|-------|
-| `4w` | 28 days | `[today-27, today]` |
-| `8w` | 56 days | `[today-55, today]` |
-| `12w` | 84 days | `[today-83, today]` |
-
-**Weekly buckets** (`WEEK_BUCKETS`, used for the per-week "completed" trend):
-four 7-day windows ending 0, 7, 14, 21 days back (`w1`…`w4`).
-
-A slot counts toward a window only if its **planned date** falls inside that
-window's range (`_in_range`).
-
----
-
-## 6. Aggregate counts (the dashboard table & KPI cards)
-
-`_aggregate_reviews(table, date_prefix, status_prefix, count)` produces, per
-coach (owner):
-
-- `periods[key].required` — number of qualifying slots whose planned date is in
-  the window. **Includes completed ones** — it's "everything that was due".
-- `periods[key].completed` — the subset of those that are `Completed`.
-- `weeks[wK]` — count of `Completed` slots planned in each weekly bucket.
-
-So on the dashboard, a card like **"PR 12-Week: 27 / 37 completed"** means: 37
-reviews were planned/due in the last 12 weeks, 27 of them are completed,
-**10 are still outstanding**.
-
-Completion rate = `completed / required` (0 when required is 0). These feed the
-coach rows in `compute_coaches_lateness()` and the per-coach detail KPIs.
-
-> Note: the KPI uses 4w / 8w / 12w PR windows and 4w / 8w / 12w MCM windows.
-> Backward-compat keys (`overall_pr_*`) alias the 12-week PR numbers.
-
----
-
-## 7. Drill-down lists (the "Learner Breakdown" drawer)
-
-`_review_drill(...)` returns three learner lists per review type, used to build
-the drawer sections. **Key behaviour: a completed review is NOT shown as
-required.**
-
-| Returned list | Meaning |
-|---------------|---------|
-| `completed_4w` | `Completed` slots planned in the **4-week** window |
-| `completed_12w` | `Completed` slots planned in the **12-week** window |
-| `outstanding_12w` | slots planned in the **12-week** window that are **not** `Completed` |
-
-By construction: **`outstanding_12w` + `completed_12w` = total planned in 12w
-= the KPI "required" count.** Each outstanding entry's detail is
-`"<planned-date> · <status>"` (e.g. `2026-04-29 · In Progress`) so you can see
-why it's still open.
-
-### Drawer sections produced (in `compute_coach_drill`)
-
-| Section key | Label | Source |
-|-------------|-------|--------|
-| `pr_completed` | PR Completed (last 4 weeks) | `pr_completed_4w` |
-| `pr_completed_12w` | PR Completed (last 12 weeks) | `pr_completed_12w` |
-| `pr_required` | PR Outstanding (last 12 weeks) | `pr_outstanding_12w` |
-| `mcm_completed` | MCM Completed (last 4 weeks) | `mcm_completed_4w` |
-| `mcm_completed_12w` | MCM Completed (last 12 weeks) | `mcm_completed_12w` |
-| `mcm_required` | MCM Outstanding (last 12 weeks) | `mcm_outstanding_12w` |
-
-The section keys `pr_required` / `mcm_required` are kept for frontend
-compatibility even though the label now reads "Outstanding".
-
----
-
-## 8. The per-learner table
-
-`_compute_coach_learner_table()` builds one row per active learner of a coach,
-joining across all four source tables keyed by email (falling back to name).
-For PR and MCM it uses `_latest_review_status()` — the status + date of the
-**most recent planned** review slot for that learner — shown as the
-`pr_status` / `pr_date` / `mcm_status` / `mcm_date` columns in the drawer's
-learner table.
-
----
-
-## 9. Endpoints
-
-| Endpoint | View | Returns |
-|----------|------|---------|
-| `GET /api/coaches-lateness/` | `CoachesLatenessViewSet` | `compute_coaches_lateness()` — all coach rows incl. PR/MCM aggregates |
-| `GET /api/coach-drill/?coach=&case_owner_id=` | `CoachDrillView` | `compute_coach_drill()` — the drill sections above + per-learner table |
-
----
-
-## 10. Gotchas / things to remember
-
-- **Why is "Required" sometimes lower than the KPI's required number?** It isn't
-  a bug — the drawer's "Outstanding" list deliberately excludes completed
-  reviews; add the matching "Completed (12 weeks)" section back to reconcile.
-- **MCR has no `case_owner_id`** — MCM owner matching is name-only, so an exact
-  `CaseOwner` name is required for MCM drill matches.
-- **Personal Support Plans are excluded** from all PR/MCM counts.
-- **Dates are parsed from free text** — the first `dd-mm-yyyy` token wins; rows
-  with unparseable dates are silently skipped.
-- All numbers are **live** — they shift as `today` moves and as the source
-  tables update. There is no caching or write-back for PR/MCM.
+The separate timetable/current-week planning views continue to use their own
+booking selectors; they measure scheduled meetings rather than these rolling
+coach-directory review metrics.
