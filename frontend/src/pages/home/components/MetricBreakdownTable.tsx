@@ -242,6 +242,20 @@ function formatMeetingDate(value: string) {
   return date.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
 }
 
+function monthKey(value: string) {
+  return value ? value.slice(0, 7) : "";
+}
+
+function addCalendarMonths(value: Date, amount: number) {
+  const result = new Date(value.getFullYear(), value.getMonth() + amount, 1);
+  result.setHours(0, 0, 0, 0);
+  return result;
+}
+
+function formatMonthHeader(value: Date) {
+  return value.toLocaleDateString("en-GB", { month: "short", year: "numeric" });
+}
+
 function learnerInitials(name: string) {
   return name
     .split(/\s+/)
@@ -287,23 +301,30 @@ function ReviewTrend({ rows, learners, includeAllLearners, metric }: { rows: Met
       });
   }, [rows, learners, includeAllLearners, learnerDetails]);
 
-  const columnCount = Math.max(12, ...learnerRows.flatMap(({ meetingRows }) => meetingRows.map((row) => row.slot ?? 0)), ...learnerRows.map(({ meetingRows }) => meetingRows.length), 0);
+  const monthColumns = useMemo(() => {
+    const dated = rows.map((row) => row.date).filter(Boolean).sort();
+    const current = new Date();
+    current.setDate(1);
+    current.setHours(0, 0, 0, 0);
+    const first = dated.length ? new Date(`${monthKey(dated[0])}-01T00:00:00`) : current;
+    const last = dated.length ? new Date(`${monthKey(dated[dated.length - 1])}-01T00:00:00`) : current;
+    // Keep a readable 12-month calendar while ensuring the current month is visible.
+    let start = first > current
+      ? current
+      : (first < addCalendarMonths(current, -11) ? addCalendarMonths(current, -11) : first);
+    if (last > addCalendarMonths(start, 11)) start = addCalendarMonths(last, -11);
+    return Array.from({ length: 12 }, (_, index) => addCalendarMonths(start, index));
+  }, [rows]);
+  const columnCount = monthColumns.length;
   const gridTemplateColumns = `280px repeat(${columnCount}, minmax(92px, 1fr))`;
-  const slotDates = Array.from({ length: columnCount }, (_, index) => {
-    const dates = Array.from(new Set(
-      learnerRows
-        .map(({ meetingRows }) => meetingRows.find((row) => row.slot === index + 1)?.date || "")
-        .filter(Boolean),
-    ));
-    return dates.length > 0 ? formatMeetingDate(dates[0]) : "—";
-  });
+  const currentMonth = monthKey(new Date().toISOString().slice(0, 10));
 
   return (
     <div style={{ border: "1px solid var(--color-border)", borderRadius: "var(--radius-lg)", overflow: "hidden", background: "var(--color-surface)" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", borderBottom: "1px solid var(--color-border)", background: "var(--color-canvas)" }}>
         <h3 style={{ margin: 0, fontSize: "var(--text-md)", color: "var(--color-text-primary)" }}>Learner × {metric === "MCM" ? "monthly coaching meeting" : "progress review"}</h3>
-        <span style={{ padding: "3px 8px", borderRadius: 999, background: "#F1EDFF", color: "#5B36B7", fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}>
-          {columnCount} {metric} columns
+          <span style={{ padding: "3px 8px", borderRadius: 999, background: "#F1EDFF", color: "#5B36B7", fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}>
+          Monthly {metric} timeline
         </span>
         <span style={{ marginLeft: "auto", color: "var(--color-text-muted)", fontSize: 11, whiteSpace: "nowrap" }}>Scroll sideways for all months →</span>
       </div>
@@ -314,12 +335,14 @@ function ReviewTrend({ rows, learners, includeAllLearners, metric }: { rows: Met
             <div style={{ padding: "13px 14px", color: "#52607A", fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", borderRight: "1px solid var(--color-border)" }}>
               Learner · progress · next
             </div>
-            {Array.from({ length: columnCount }, (_, index) => (
-              <div key={index} style={{ textAlign: "center", padding: "10px 4px 7px", borderRight: "1px solid #ECEBE7" }}>
-                <div style={{ fontFamily: "monospace", fontSize: 11, fontWeight: 700, color: "#25324D" }}>{metric} {index + 1}</div>
-                <div style={{ fontSize: 10, color: "#8A94A8", marginTop: 3, whiteSpace: "nowrap" }}>{slotDates[index]}</div>
+            {monthColumns.map((month) => {
+              const key = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, "0")}`;
+              const isCurrent = key === currentMonth;
+              return <div key={key} style={{ textAlign: "center", padding: "10px 4px 7px", borderRight: "1px solid #ECEBE7", background: isCurrent ? "#FFF8E1" : "transparent", boxShadow: isCurrent ? "inset 0 -3px 0 #F2C969" : undefined }}>
+                <div style={{ fontFamily: "monospace", fontSize: 11, fontWeight: 700, color: isCurrent ? "#9A5B00" : "#25324D" }}>{formatMonthHeader(month)}</div>
+                {isCurrent && <div style={{ fontSize: 9, color: "#A45D00", marginTop: 3, fontWeight: 700 }}>CURRENT MONTH</div>}
               </div>
-            ))}
+            })}
           </div>
 
           {learnerRows.length === 0 ? (
@@ -330,7 +353,7 @@ function ReviewTrend({ rows, learners, includeAllLearners, metric }: { rows: Met
             const learnerName = first?.name || detail?.name || "Unknown learner";
             const learnerProgramme = first?.programme || detail?.programme || "—";
             const attended = meetingRows.filter((row) => row.status === "Completed").length;
-            const progress = Math.min(100, Math.round((attended / Math.max(columnCount, 1)) * 100));
+            const progress = Math.min(100, Math.round((attended / Math.max(meetingRows.length, 1)) * 100));
             return (
               <div key={key} style={{ display: "grid", gridTemplateColumns, minHeight: 118, borderBottom: "1px solid #ECEBE7", background: "var(--color-surface)" }}>
                 <div style={{ padding: "12px 14px", borderRight: "1px solid var(--color-border)", minWidth: 0 }}>
@@ -343,21 +366,24 @@ function ReviewTrend({ rows, learners, includeAllLearners, metric }: { rows: Met
                   </div>
                   <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
                     <div style={{ height: 4, flex: 1, background: "#E3E4E7", borderRadius: 99, overflow: "hidden" }}><div style={{ width: `${progress}%`, height: "100%", background: "#3D61AF", borderRadius: 99 }} /></div>
-                    <span style={{ fontSize: 11, fontWeight: 700, color: "#25324D", whiteSpace: "nowrap" }}>{attended}/{columnCount}</span>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: "#25324D", whiteSpace: "nowrap" }}>{attended}/{meetingRows.length}</span>
                   </div>
                   <div style={{ marginTop: 7, color: "#78849B", fontSize: 10 }}>
                     {meetingRows.find((row) => row.status !== "Completed") ? `Next: ${formatMeetingDate(meetingRows.find((row) => row.status !== "Completed")?.date || "")}` : "All recorded meetings attended"}
                   </div>
                 </div>
 
-                {Array.from({ length: columnCount }, (_, index) => {
-                  const meeting = meetingRows.find((row) => row.slot === index + 1) || (meetingRows.every((row) => row.slot == null) ? meetingRows[index] : undefined);
+                {monthColumns.map((month) => {
+                  const key = `${month.getFullYear()}-${String(month.getMonth() + 1).padStart(2, "0")}`;
+                  const isCurrent = key === currentMonth;
+                  const meetings = meetingRows.filter((row) => monthKey(row.date) === key);
+                  const meeting = meetings[0];
                   if (!meeting) {
-                    return <div key={index} style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, borderRight: "1px solid #F0EFEC", color: "#52607A", background: "#FAFAFA" }}><div style={{ width: 42, height: 42, borderRadius: "50%", border: "2px solid #AAB7C7", background: "#EEF2F6", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 19 }}><i className="ri-calendar-line" aria-hidden="true" /></div><span style={{ fontSize: 10 }}>Planned</span></div>;
+                    return <div key={key} style={{ minHeight: 112, borderRight: "1px solid #F0EFEC", background: isCurrent ? "#FFFDF2" : "#FFFFFF" }} />;
                   }
                   const visual = timelineStatus(meeting.status);
                   return (
-                    <div key={index} style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, borderRight: "1px solid #F0EFEC", minWidth: 0 }}>
+                    <div key={key} style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, borderRight: "1px solid #F0EFEC", minWidth: 0, background: isCurrent ? "#FFFDF2" : "transparent" }}>
                       <div style={{ position: "absolute", left: 0, right: 0, top: "50%", height: 1, background: "#E5E7EB", zIndex: 0 }} />
                       <div style={{ position: "relative", zIndex: 1, color: visual.color, fontSize: 11, background: "var(--color-surface)", padding: "0 4px" }}>{formatMeetingDate(meeting.date)}</div>
                       <div style={{ position: "relative", zIndex: 1, width: 40, height: 40, borderRadius: "50%", border: `2px solid ${visual.border}`, background: visual.background, display: "flex", alignItems: "center", justifyContent: "center", color: visual.color, fontSize: 19, fontWeight: 700, boxShadow: `0 0 0 5px ${visual.background}` }}><i className={visual.icon} aria-hidden="true" /></div>
