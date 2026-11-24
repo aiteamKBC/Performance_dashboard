@@ -246,9 +246,9 @@ def _empty():
 def _coach_performance(cursor, coach_emails, caseload, as_of=None):
     """Return the LMS dashboard's authoritative card metrics by coach email.
 
-    This mirrors ``coach_performance_metrics_by_coach`` in LMS_v2: attendance
-    is separate from learning activity engagement; review rates come from ``Learner.reviews`` and
-    OTJH bands come from the persisted coach dashboard snapshot.
+    Attendance averages the LMS snapshot rate over the visible coach caseload;
+    it is separate from learning activity engagement. Review rates come from
+    ``Learner.reviews`` and OTJH bands from the coach dashboard snapshot.
     """
     emails = sorted({str(email).strip().lower() for email in coach_emails if str(email or '').strip()})
     if not emails:
@@ -259,13 +259,27 @@ def _coach_performance(cursor, coach_emails, caseload, as_of=None):
 
     as_of = as_of or datetime.now(ZoneInfo('Europe/London')).date()
 
-    # Snapshot metrics are already the LMS UI's canonical attendance/OTJH
-    # projection.  The query aggregates JSON in Postgres so full snapshots do
-    # not cross the application boundary.
+    # Attendance uses the same visible LMS profiles as Total Learners.  The
+    # snapshot can also contain test or otherwise excluded profiles, so its
+    # active flag alone is not enough to define the card's population.
+    visible = sorted({
+        (str(learner['coach_email']).strip().lower(), str(learner['id']))
+        for learner in caseload
+        if learner.get('coach_email') and learner.get('id') is not None
+    })
+    visible_emails = [email for email, _ in visible]
+    visible_ids = [identity for _, identity in visible]
+
+    # Keep the existing OTJH snapshot calculation independent of attendance.
+    # Aggregate in Postgres so full snapshots do not cross the app boundary.
     q = '''
+        WITH visible_coach_learners AS (
+            SELECT owner_email, learner_id
+              FROM unnest(%s::text[], %s::text[]) AS v(owner_email, learner_id)
+        )
         SELECT lower(s.owner_email),
                round(avg((learner->>\'attendanceRate\')::numeric)
-                     FILTER (WHERE learner->>\'enrollmentStatus\' = \'active\'
+                     FILTER (WHERE visible.learner_id IS NOT NULL
                                   AND learner->>\'attendanceRateAvailable\' = \'true\'
                                   AND learner->>\'attendanceRate\' IS NOT NULL))::int,
                count(*) FILTER (WHERE learner->>\'enrollmentStatus\' = \'active\'
@@ -278,9 +292,12 @@ def _coach_performance(cursor, coach_emails, caseload, as_of=None):
           CROSS JOIN LATERAL jsonb_array_elements(
               coalesce(s.payload->\'learners\', \'[]\'::jsonb)
           ) AS learner
+          LEFT JOIN visible_coach_learners visible
+            ON visible.owner_email = lower(s.owner_email)
+           AND visible.learner_id = learner->>\'id\'
          GROUP BY lower(s.owner_email)
     '''
-    cursor.execute(q)
+    cursor.execute(q, (visible_emails, visible_ids))
     result = {}
     for email, attendance, on_track, need_attention, at_risk in cursor.fetchall():
         if email not in emails:
