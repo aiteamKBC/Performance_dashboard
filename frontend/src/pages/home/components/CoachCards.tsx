@@ -5,6 +5,7 @@ import CoachConflictsModal from "./CoachConflictsModal";
 interface CoachCardsProps {
   records: CoachRecord[];
   onSelect: (record: CoachRecord) => void;
+  onSelectMetric: (record: CoachRecord, metric: string) => void;
   /** Section divider label (default "Coaches"). */
   title?: string;
 }
@@ -24,16 +25,16 @@ function tone(value: number, good: number, warn: number, invert = false) {
   return "var(--color-success)";
 }
 
-function Stat({ label, value, color }: { label: string; value: string | number; color?: string }) {
+function Stat({ label, value, color, onClick }: { label: string; value: string | number; color?: string; onClick: () => void }) {
   return (
-    <div style={{ minWidth: 0 }}>
+    <button type="button" className="coach-card-stat" onClick={onClick} aria-label={`View ${label} breakdown: ${value}`} style={{ minWidth: 0 }}>
       <p style={{ margin: 0, fontSize: 10, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>{label}</p>
       <p className="tabular-nums" style={{ margin: 0, fontSize: "var(--text-sm)", fontWeight: "var(--font-semibold)", color: color ?? "var(--color-text-primary)" }}>{value}</p>
-    </div>
+    </button>
   );
 }
 
-export default function CoachCards({ records, onSelect, title = "Coaches" }: CoachCardsProps) {
+export default function CoachCards({ records, onSelect, onSelectMetric, title = "Coaches" }: CoachCardsProps) {
   // Coach whose conflicts popup is open (opened from the card's badge).
   const [conflictsFor, setConflictsFor] = useState<CoachRecord | null>(null);
 
@@ -63,12 +64,11 @@ export default function CoachCards({ records, onSelect, title = "Coaches" }: Coa
           const otjhNeedAttention = r.otjhVarNeedAttention ?? r.otjhNeedAttention;
           const otjhAtRisk = r.otjhVarAtRisk ?? r.otjhAtRisk;
           return (
-            <button
+            <article
               key={r.id}
-              onClick={() => onSelect(r)}
               className="coach-card"
               style={{
-                textAlign: "left", cursor: "pointer",
+                textAlign: "left",
                 background: "var(--color-surface)",
                 border: "1px solid var(--color-border)",
                 borderRadius: "var(--radius-lg)",
@@ -76,19 +76,9 @@ export default function CoachCards({ records, onSelect, title = "Coaches" }: Coa
                 boxShadow: "var(--shadow-card)",
                 transition: "border-color .15s, box-shadow .15s, transform .15s",
               }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = "var(--color-accent)";
-                e.currentTarget.style.boxShadow = "var(--shadow-raised)";
-                e.currentTarget.style.transform = "translateY(-2px)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = "var(--color-border)";
-                e.currentTarget.style.boxShadow = "var(--shadow-card)";
-                e.currentTarget.style.transform = "none";
-              }}
             >
               {/* Header */}
-              <div style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", marginBottom: "var(--space-3)" }}>
+              <button type="button" className="coach-card-header" onClick={() => onSelect(r)} aria-label={`Open ${r.coach} details`} style={{ display: "flex", alignItems: "center", gap: "var(--space-3)", marginBottom: (r.coachConflicts?.length ?? 0) > 0 ? 4 : "var(--space-3)" }}>
                 <div style={{
                   width: 40, height: 40, borderRadius: "50%", flexShrink: 0,
                   background: "var(--color-accent)", color: "#fff",
@@ -100,48 +90,43 @@ export default function CoachCards({ records, onSelect, title = "Coaches" }: Coa
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <p style={{ margin: 0, fontSize: "var(--text-sm)", fontWeight: "var(--font-semibold)", color: "var(--color-text-primary)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.coach}</p>
                   <p style={{ margin: 0, fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>{r.totalLearners} learners</p>
-                  {(r.coachConflicts?.length ?? 0) > 0 && (
-                    <span
-                      // A span, not a button: the whole card is already a button.
-                      onClick={(e) => { e.stopPropagation(); setConflictsFor(r); }}
-                      title="Click to see the learners with a different coach or status on Aptem and on the LMS"
-                      style={{
-                        cursor: "pointer",
-                        display: "inline-flex", alignItems: "center", gap: 4, marginTop: 4,
-                        fontSize: 10, fontWeight: "var(--font-semibold)",
-                        color: "var(--color-warning)", background: "var(--color-warning-bg)",
-                        border: "1px solid var(--color-warning-border)",
-                        borderRadius: 999, padding: "1px 8px",
-                      }}
-                    >
-                      <i className="ri-error-warning-line" aria-hidden="true" />
-                      {conflictsLabel(r.coachConflicts!)}
-                    </span>
-                  )}
                 </div>
                 <i className="ri-arrow-right-line" style={{ color: "var(--color-text-muted)" }} aria-hidden="true" />
-              </div>
+              </button>
+              {(r.coachConflicts?.length ?? 0) > 0 && (
+                <button type="button" onClick={() => setConflictsFor(r)} title="View coach or status conflicts" style={{
+                  cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 4,
+                  margin: "0 0 var(--space-3) 52px", fontSize: 10, fontWeight: "var(--font-semibold)",
+                  color: "var(--color-warning)", background: "var(--color-warning-bg)",
+                  border: "1px solid var(--color-warning-border)", borderRadius: 999, padding: "1px 8px",
+                }}>
+                  <i className="ri-error-warning-line" aria-hidden="true" />
+                  {conflictsLabel(r.coachConflicts!)}
+                </button>
+              )}
 
               {/* Metrics grid */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "var(--space-2) var(--space-3)" }}>
-                <Stat label="Total Learners" value={r.totalLearners} />
-                <Stat label="Engagement" value={`${r.learnerEngagement}%`} color={tone(r.learnerEngagement, 85, 70)} />
+                <Stat label="Total Learners" value={r.totalLearners} onClick={() => onSelectMetric(r, "TOTAL")} />
+                <Stat label="Engagement" value={`${r.learnerEngagement}%`} color={tone(r.learnerEngagement, 85, 70)} onClick={() => onSelectMetric(r, "ENGAGED")} />
                 <Stat
                   label="PR Rate"
                   value={prRate == null ? "—" : `${prRate}%`}
                   color={prRate == null ? "var(--color-text-muted)" : tone(prRate, 90, 70)}
+                  onClick={() => onSelectMetric(r, "PR")}
                 />
-                <Stat label="OTJH Risk" value={otjhAtRisk} color={tone(otjhAtRisk, 4, 7, true)} />
-                <Stat label="Pending" value={r.pending} color={r.pending > 0 ? "var(--color-warning)" : "var(--color-success)"} />
+                <Stat label="OTJH Risk" value={otjhAtRisk} color={tone(otjhAtRisk, 4, 7, true)} onClick={() => onSelectMetric(r, "OTJH")} />
+                <Stat label="Pending" value={r.pending} color={r.pending > 0 ? "var(--color-warning)" : "var(--color-success)"} onClick={() => onSelectMetric(r, "PENDING")} />
                 <Stat
                   label="Attendance"
                   value={r.attendanceRate == null ? "—" : `${r.attendanceRate}%`}
                   color={r.attendanceRate == null ? "var(--color-text-muted)" : tone(r.attendanceRate, 85, 70)}
+                  onClick={() => onSelectMetric(r, "ATTENDANCE")}
                 />
               </div>
 
               {/* OTJH mini-bar */}
-              <div style={{ marginTop: "var(--space-3)" }}>
+              <button type="button" className="coach-card-otjh" onClick={() => onSelectMetric(r, "OTJH")} aria-label={`View ${r.coach} OTJH breakdown`} style={{ marginTop: "var(--space-3)" }}>
                 <p style={{ margin: "0 0 4px", fontSize: 10, color: "var(--color-text-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>OTJH</p>
                 <div style={{ display: "flex", height: 6, borderRadius: 999, overflow: "hidden", background: "var(--color-canvas)" }}>
                   {(() => {
@@ -158,8 +143,8 @@ export default function CoachCards({ records, onSelect, title = "Coaches" }: Coa
                     );
                   })()}
                 </div>
-              </div>
-            </button>
+              </button>
+            </article>
           );
         })}
       </div>
@@ -171,6 +156,15 @@ export default function CoachCards({ records, onSelect, title = "Coaches" }: Coa
           onClose={() => setConflictsFor(null)}
         />
       )}
+      <style>{`
+        .coach-card:hover { border-color: var(--color-accent) !important; box-shadow: var(--shadow-raised) !important; transform: translateY(-2px); }
+        .coach-card-header, .coach-card-stat, .coach-card-otjh { border: 0; background: transparent; text-align: left; color: inherit; cursor: pointer; font: inherit; }
+        .coach-card-header { width: 100%; padding: 0; }
+        .coach-card-stat { padding: 3px 4px; border-radius: var(--radius-md); }
+        .coach-card-otjh { width: 100%; padding: 0; border-radius: var(--radius-md); }
+        .coach-card-stat:hover, .coach-card-header:hover, .coach-card-otjh:hover { background: var(--color-canvas); }
+        .coach-card-stat:focus-visible, .coach-card-header:focus-visible, .coach-card-otjh:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+      `}</style>
     </div>
   );
 }

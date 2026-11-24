@@ -1170,6 +1170,12 @@ def compute_coach_drill(coach_name=None, case_owner_id=None, source=None):
 
     owner_email = _lower(owned[0].get('coach_email')) if owned else ''
     owner_metrics = lms_data.get('performance_by_email', {}).get(owner_email, {})
+    attendance_learners = owner_metrics.get('attendance_learners', {})
+    for row in per_learner:
+        attendance = attendance_learners.get(str(row['lms_id'])) or {}
+        row['attendance_rate'] = attendance.get('rate')
+        row['attendance_present'] = attendance.get('present')
+        row['attendance_sessions'] = attendance.get('sessions')
     if 'pending_learners' in owner_metrics:
         pending_learners = owner_metrics['pending_learners']
     # This metric has no equivalent in the current LMS.
@@ -1387,6 +1393,7 @@ def _compute_coach_learner_table(name, cid, resolve, extras, pr_learners, mcm_le
 
 def _lms_owned_learner_table(owned, legacy_rows):
     """One row per LMS profile; legacy email joins cannot define the population."""
+    today = _today()
     by_email = {_lower(r["email"]): r for r in legacy_rows if r.get("email")}
     email_counts = {}
     for learner in owned:
@@ -1403,6 +1410,8 @@ def _lms_owned_learner_table(owned, legacy_rows):
                **legacy, "lms_id": learner["id"], "name": learner["name"],
                "email": learner.get("email") or "", "programme": learner.get("programme") or "",
                "source": "LMS", "pending": learner["pending"],
+               "engagement_last_activity": learner["last_activity"].isoformat() if learner.get("last_activity") else "",
+               "engaged_30d": bool(learner.get("last_activity") and 0 <= (today - learner["last_activity"]).days <= 29),
                "marking_source": "lms:learning_reflection_submissions"}
         result.append(row)
     return sorted(result, key=lambda row: (row["name"], row["lms_id"]))

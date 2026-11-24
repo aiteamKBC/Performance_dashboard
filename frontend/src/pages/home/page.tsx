@@ -99,8 +99,8 @@ export default function Home() {
   }, [searchQuery, activeCoach, coachRecords]);
 
   // The coach name lets the coach page start loading its learners at once.
-  const openCoach = (r: CoachRecord) =>
-    navigate(`/coach/${r.id}`, { state: { coach: r.coach, caseOwnerId: r.caseOwnerId } });
+  const openCoach = (r: CoachRecord, metric?: string) =>
+    navigate(`/coach/${r.id}`, { state: { coach: r.coach, caseOwnerId: r.caseOwnerId, metric } });
 
   const getLatestSnapshotDate = (rows: CoachRecord[]) => {
     const normalizedDates = rows
@@ -198,7 +198,7 @@ export default function Home() {
           <ActiveLearnersNote />
 
           {/* Coach cards — click to open the coach's learners */}
-          <CoachCards records={filtered} onSelect={openCoach} />
+          <CoachCards records={filtered} onSelect={(r) => openCoach(r)} onSelectMetric={openCoach} />
 
           {/* Chart row */}
           <ChartsSection records={filtered} />

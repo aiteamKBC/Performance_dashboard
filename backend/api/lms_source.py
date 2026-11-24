@@ -282,6 +282,13 @@ def _coach_performance(cursor, coach_emails, caseload, as_of=None):
                      FILTER (WHERE visible.learner_id IS NOT NULL
                                   AND learner->>\'attendanceRateAvailable\' = \'true\'
                                   AND learner->>\'attendanceRate\' IS NOT NULL))::int,
+               jsonb_object_agg(learner->>\'id\', jsonb_build_object(
+                   \'rate\', (learner->>\'attendanceRate\')::numeric,
+                   \'present\', nullif(learner->>\'attendancePresent\', \'\')::int,
+                   \'sessions\', nullif(learner->>\'attendanceSessions\', \'\')::int
+               )) FILTER (WHERE visible.learner_id IS NOT NULL
+                            AND learner->>\'attendanceRateAvailable\' = \'true\'
+                            AND learner->>\'attendanceRate\' IS NOT NULL),
                count(*) FILTER (WHERE learner->>\'enrollmentStatus\' = \'active\'
                                   AND learner->>\'otjhRagStatus\' = \'on-track\')::int,
                count(*) FILTER (WHERE learner->>\'enrollmentStatus\' = \'active\'
@@ -299,11 +306,12 @@ def _coach_performance(cursor, coach_emails, caseload, as_of=None):
     '''
     cursor.execute(q, (visible_emails, visible_ids))
     result = {}
-    for email, attendance, on_track, need_attention, at_risk in cursor.fetchall():
+    for email, attendance, attendance_learners, on_track, need_attention, at_risk in cursor.fetchall():
         if email not in emails:
             continue
         result[email] = {
             'attendance_rate': int(attendance) if attendance is not None else None,
+            'attendance_learners': attendance_learners or {},
             'otjh_ontrack': int(on_track or 0),
             'otjh_need_attention': int(need_attention or 0),
             'otjh_at_risk': int(at_risk or 0),

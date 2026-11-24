@@ -64,6 +64,11 @@ export interface DrillLearnerRow {
   activities_total: number;
   attendance_done: number;
   attendance_total: number;
+  attendance_rate: number | null;
+  attendance_present: number | null;
+  attendance_sessions: number | null;
+  engagement_last_activity: string;
+  engaged_30d: boolean;
   last_activity: string;
 }
 

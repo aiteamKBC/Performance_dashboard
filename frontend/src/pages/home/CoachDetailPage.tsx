@@ -55,20 +55,24 @@ export default function CoachDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   // Set when opened from a coach card (see Home's openCoach).
-  const opener = useLocation().state as { coach?: string; caseOwnerId?: number | null } | null;
+  const opener = useLocation().state as { coach?: string; caseOwnerId?: number | null; metric?: string } | null;
   const [record, setRecord] = useState<CoachRecord | null>(null);
   const [drill, setDrill] = useState<CoachDrill | null>(null);
   const [loading, setLoading] = useState(true);
   const [drillLoading, setDrillLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [highlightedSection, setHighlightedSection] = useState<string | null>(null);
-  const [breakdownMetric, setBreakdownMetric] = useState<string>("ALL");
+  const [breakdownSelection, setBreakdownSelection] = useState(() => ({
+    metric: opener?.metric ?? "ALL",
+    status: opener?.metric === "OTJH" ? "At Risk" : "ALL",
+    period: opener?.metric === "PR" ? "12W" : "ALL",
+  }));
   const [showActionPlan, setShowActionPlan] = useState(false);
 
   // Scroll to the metric breakdown table, optionally
   // pre-filtering by metric, and briefly highlight it.
-  const scrollToBreakdown = (metricKey: string) => {
-    setBreakdownMetric(metricKey);
+  const scrollToBreakdown = (metricKey: string, status = "ALL", period = "ALL") => {
+    setBreakdownSelection({ metric: metricKey, status, period });
     window.setTimeout(() => {
       const el = document.getElementById("metric-breakdown");
       if (!el) return;
@@ -79,6 +83,14 @@ export default function CoachDetailPage() {
       }, 1600);
     }, 0);
   };
+
+  useEffect(() => {
+    if (!drill || !opener?.metric) return;
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById("metric-breakdown")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [drill, opener?.metric]);
 
   useEffect(() => {
     let cancelled = false;
@@ -291,8 +303,8 @@ export default function CoachDetailPage() {
 
             {/* KPI header — all six cards use the same LMS coach population. */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "var(--space-3)" }}>
-              <KpiCard label="Total learners" value={record.totalLearners} sub="Your caseload" onClick={() => scrollToBreakdown("ALL")} />
-              <KpiCard label="OTJH at risk" value={otjhCounts["At Risk"]} sub={`${otjhCounts["Need Attention"]} need attention`} onClick={() => scrollToBreakdown("OTJH")} />
+              <KpiCard label="Total learners" value={record.totalLearners} sub="Your caseload" onClick={() => scrollToBreakdown("TOTAL")} />
+              <KpiCard label="OTJH at risk" value={otjhCounts["At Risk"]} sub={`${otjhCounts["Need Attention"]} need attention`} onClick={() => scrollToBreakdown("OTJH", "At Risk")} />
               <KpiCard label="Pending marking" value={drill?.pending_marking_count ?? record.pending} sub="Pending submissions" onClick={() => scrollToBreakdown("PENDING")} />
               <KpiCard label="PR this week" value={drillMetricValue(drill?.pr_this_week)} sub={`Progress reviews · ${weekRangeLabel}`} onClick={() => scrollToBreakdown("PR")} />
               <KpiCard label="MCM this week" value={drillMetricValue(drill?.mcm_this_week)} sub={`Monthly coaching · ${weekRangeLabel}`} onClick={() => scrollToBreakdown("MCM")} />
@@ -380,7 +392,7 @@ export default function CoachDetailPage() {
                     : {}),
                 }}
               >
-                <MetricBreakdownTable learners={drill.per_learner} reviewRows={drill.review_rows} pendingRows={drill.pending_marking ?? []} initialMetric={breakdownMetric} coachName={record.coach} />
+                <MetricBreakdownTable learners={drill.per_learner} reviewRows={drill.review_rows} pendingRows={drill.pending_marking ?? []} initialMetric={breakdownSelection.metric} initialStatus={breakdownSelection.status} initialPeriod={breakdownSelection.period} pr12Counts={record.prByLearner?.["12w"]} coachName={record.coach} />
               </div>
             )}
           </>

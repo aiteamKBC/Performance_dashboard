@@ -13,6 +13,10 @@ const STATUS_COLOR: Record<string, string> = {
   "Awaiting Signature": "#EA580C",
   "In Progress": "#4F46E5",
   "Not Scheduled": "#DC2626",
+  Engaged: "#16A34A",
+  "No recent activity": "#DC2626",
+  Available: "#16A34A",
+  Unavailable: "#6B7280",
   Rescheduled: "#B65313",
   Cancelled: "#6B7280",
   Archived: "#6B7280",
@@ -32,10 +36,12 @@ function statusPill(value: string) {
 // Metric keys. Status + time-period filters apply only to PR and MCM.
 const METRICS = [
   { key: "ALL", label: "All Metrics" },
+  { key: "TOTAL", label: "Total Learners" },
   { key: "PR", label: "PR" },
   { key: "MCM", label: "MCM" },
   { key: "OTJH", label: "OTJH" },
-  { key: "ENGAGED", label: "Engaged" },
+  { key: "ENGAGED", label: "Engagement" },
+  { key: "ATTENDANCE", label: "Attendance" },
   { key: "PENDING", label: "Pending Marking" },
   { key: "CLOSURE", label: "Referred Closure" },
   { key: "RECENT", label: "Recent Submitters" },
@@ -49,6 +55,8 @@ const STATUS_OPTIONS: Record<string, string[]> = {
   PR: ["Completed", "Scheduled", "Awaiting Signature", "Not Scheduled", "In Progress", "Rescheduled", "Cancelled", "Archived"],
   MCM: ["Completed", "Scheduled", "Awaiting Signature", "Not Scheduled", "In Progress", "Rescheduled", "Cancelled", "Archived"],
   OTJH: ["At Risk", "Need Attention", "On Track"],
+  ENGAGED: ["Engaged", "No recent activity"],
+  ATTENDANCE: ["Available", "Unavailable"],
 };
 
 // Windows are calendar months back from today (4w → 1 month, 8w → 2, 12w → 3),
@@ -74,6 +82,9 @@ interface MetricRow {
   target?: string;
   targetHours?: number;   // numeric form of the computed target (for Excel export)
   pendingCount?: number;
+  attendanceRate?: number | null;
+  attendancePresent?: number | null;
+  attendanceSessions?: number | null;
   progressHours?: string;
   progressVariance?: string;
 }
@@ -125,6 +136,9 @@ function sortValue(r: MetricRow, header: string): string | number | null {
       const n = Number(r.progressVariance.replace(/[^0-9.\-]/g, ""));
       return Number.isNaN(n) ? null : n;
     }
+    case "Rate": return r.attendanceRate ?? null;
+    case "Present": return r.attendancePresent ?? null;
+    case "Sessions": return r.attendanceSessions ?? null;
     default: return null;
   }
 }
@@ -156,6 +170,15 @@ function buildRows(learners: DrillLearnerRow[], reviewRows: ReviewRow[], pending
 
   for (const l of learners) {
     const base = { name: l.name, email: l.email, programme: l.programme };
+    out.push({ ...base, metric: "Total Learners", metricKey: "TOTAL", status: l.status || "Active", date: "" });
+    out.push({ ...base, metric: "Engagement", metricKey: "ENGAGED",
+      status: l.engaged_30d ? "Engaged" : "No recent activity",
+      date: l.engagement_last_activity || "" });
+    out.push({ ...base, metric: "Attendance", metricKey: "ATTENDANCE",
+      status: l.attendance_rate == null ? "Unavailable" : "Available", date: "",
+      attendanceRate: l.attendance_rate,
+      attendancePresent: l.attendance_present,
+      attendanceSessions: l.attendance_sessions });
     if (l.otjh_status) {
       // Target, Progress-Hours and ProgressVariance all come straight from
       // their source columns rather than being derived.
@@ -172,7 +195,6 @@ function buildRows(learners: DrillLearnerRow[], reviewRows: ReviewRow[], pending
         progressVariance: l.otjh_progress_variance || "",
       });
     }
-    if (l.submitted > 0) out.push({ ...base, metric: "Engaged", metricKey: "ENGAGED", status: "Engaged", date: l.last_sub });
     if (l.referred_closure > 0) out.push({ ...base, metric: "Referred Closure", metricKey: "CLOSURE", status: `${l.referred_closure} closure`, date: "" });
     if (l.last_sub) out.push({ ...base, metric: "Recent Submitter", metricKey: "RECENT", status: l.last_sub, date: l.last_sub });
   }
@@ -416,7 +438,7 @@ function ReviewTrend({ rows, learners, includeAllLearners, metric }: { rows: Met
   );
 }
 
-export default function MetricBreakdownTable({ learners, reviewRows, pendingRows, initialMetric = "ALL", coachName }: { learners: DrillLearnerRow[]; reviewRows: ReviewRow[]; pendingRows: PendingMarkingRow[]; initialMetric?: string; coachName?: string }) {
+export default function MetricBreakdownTable({ learners, reviewRows, pendingRows, initialMetric = "ALL", initialStatus = "ALL", initialPeriod = "ALL", pr12Counts, coachName }: { learners: DrillLearnerRow[]; reviewRows: ReviewRow[]; pendingRows: PendingMarkingRow[]; initialMetric?: string; initialStatus?: string; initialPeriod?: string; pr12Counts?: { required: number; completed: number }; coachName?: string }) {
   const today = useMemo(() => {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
@@ -433,8 +455,8 @@ export default function MetricBreakdownTable({ learners, reviewRows, pendingRows
 
   const [metric, setMetric] = useState(initialMetric);
   const [programme, setProgramme] = useState("ALL");
-  const [status, setStatus] = useState("ALL");
-  const [period, setPeriod] = useState("ALL");
+  const [status, setStatus] = useState(initialStatus);
+  const [period, setPeriod] = useState(initialPeriod);
   const [search, setSearch] = useState("");   // free-text learner name/email filter
   const [dateFilter, setDateFilter] = useState(""); // exact meeting/review date
   const [monthFilter, setMonthFilter] = useState(""); // calendar month in YYYY-MM format
@@ -445,12 +467,12 @@ export default function MetricBreakdownTable({ learners, reviewRows, pendingRows
   // any status/period that belonged to the previous metric.
   useEffect(() => {
     setMetric(initialMetric);
-    setStatus("ALL");
-    setPeriod("ALL");
+    setStatus(initialStatus);
+    setPeriod(initialPeriod);
     setDateFilter("");
     setMonthFilter("");
     setSort(null);
-  }, [initialMetric]);
+  }, [initialMetric, initialStatus, initialPeriod]);
 
   const changeMetric = (value: string) => {
     setMetric(value);
@@ -512,11 +534,16 @@ export default function MetricBreakdownTable({ learners, reviewRows, pendingRows
   const [exportingXlsx, setExportingXlsx] = useState(false);
 
   const metricLabel = METRICS.find((m) => m.key === metric)?.label ?? metric;
+  const unfiltered = programme === "ALL" && status === "ALL" && !search.trim() && !dateFilter && !monthFilter;
+  const attendanceRates = rows.map((row) => row.attendanceRate).filter((rate): rate is number => rate != null);
 
   // When OTJH is the selected metric, swap the Window/Date columns for the
   // OTJH hour-detail columns.
   const otjhView = metric === "OTJH";
-  const headers = otjhView
+  const attendanceView = metric === "ATTENDANCE";
+  const headers = attendanceView
+    ? ["Learner", "Programme", "Metric", "Status", "Rate", "Present", "Sessions"]
+    : otjhView
     ? ["Learner", "Programme", "Metric", "Status", "Completed", "Target", "Progress-Hours", "ProgressVariance"]
     : ["Learner", "Programme", "Metric", "Status", "Window", "Date"];
 
@@ -566,13 +593,20 @@ export default function MetricBreakdownTable({ learners, reviewRows, pendingRows
 
       // Columns + rows built from the underlying data, mirroring the on-screen
       // (and Excel) column set. Learner name + email stack in one cell.
-      const head = otjhView
+      const head = attendanceView
+        ? [["Learner", "Programme", "Metric", "Status", "Rate", "Present", "Sessions"]]
+        : otjhView
         ? [["Learner", "Programme", "Metric", "Status", "Completed", "Target", "Progress Hours", "Progress Variance"]]
         : [["Learner", "Programme", "Metric", "Status", "Window", "Date"]];
 
       const body = rows.map((r) => {
         const learner = r.email ? `${r.name}\n${r.email}` : r.name;
-        return otjhView
+        return attendanceView
+          ? [learner, r.programme || "", r.metric, r.status,
+              r.attendanceRate != null ? `${r.attendanceRate}%` : "",
+              r.attendancePresent != null ? String(r.attendancePresent) : "",
+              r.attendanceSessions != null ? String(r.attendanceSessions) : ""]
+          : otjhView
           ? [
               learner, r.programme || "", r.metric, r.status,
               r.completed != null ? String(r.completed) : "",
@@ -628,13 +662,18 @@ export default function MetricBreakdownTable({ learners, reviewRows, pendingRows
     if (exportingXlsx || rows.length === 0) return;
     setExportingXlsx(true);
     try {
-      const exportHeaders = otjhView
+      const exportHeaders = attendanceView
+        ? ["Learner", "Email", "Programme", "Metric", "Status", "Rate", "Present", "Sessions"]
+        : otjhView
         ? ["Learner", "Email", "Programme", "Metric", "Status", "Completed", "Target", "Progress Hours", "Progress Variance"]
         : ["Learner", "Email", "Programme", "Metric", "Status", "Window", "Date"];
 
       const data: Cell[][] = [exportHeaders];
       for (const r of rows) {
-        if (otjhView) {
+        if (attendanceView) {
+          data.push([r.name, r.email || "", r.programme || "", r.metric, r.status,
+            r.attendanceRate ?? "", r.attendancePresent ?? "", r.attendanceSessions ?? ""]);
+        } else if (otjhView) {
           data.push([
             r.name, r.email || "", r.programme || "", r.metric, r.status,
             r.completed ?? "", r.targetHours ?? "", r.progressHours || "", r.progressVariance || "",
@@ -666,8 +705,14 @@ export default function MetricBreakdownTable({ learners, reviewRows, pendingRows
             Metric Breakdown
           </h2>
           <p style={{ margin: "2px 0 0", fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
-            {metric === "PENDING"
+            {metric === "PR" && period === "12W" && unfiltered && pr12Counts
+              ? `${pr12Counts.completed} of ${pr12Counts.required} due reviews completed · ${pr12Counts.required ? `${Math.round(pr12Counts.completed / pr12Counts.required * 100)}%` : "—"} PR rate`
+              : metric === "PENDING"
               ? `${rows.reduce((sum, row) => sum + (row.pendingCount ?? 0), 0)} pending submissions across ${rows.length} learners`
+              : metric === "ATTENDANCE"
+                ? `${attendanceRates.length} available rates across ${rows.length} learners${unfiltered && attendanceRates.length ? ` · ${Math.round(attendanceRates.reduce((sum, rate) => sum + rate, 0) / attendanceRates.length)}% average` : ""}`
+              : metric === "ENGAGED"
+                ? `${rows.filter((row) => row.status === "Engaged").length} engaged learners out of ${rows.length}`
               : `${rows.length} row${rows.length === 1 ? "" : "s"}`}
           </p>
         </div>
@@ -867,7 +912,13 @@ export default function MetricBreakdownTable({ learners, reviewRows, pendingRows
                   <td style={{ padding: "var(--space-2) var(--space-3)", fontSize: "var(--text-xs)", color: "var(--color-text-secondary)", whiteSpace: "nowrap" }}>{r.programme || "—"}</td>
                   <td style={{ padding: "var(--space-2) var(--space-3)", fontSize: "var(--text-xs)", color: "var(--color-text-primary)", whiteSpace: "nowrap" }}>{r.metric}</td>
                   <td style={{ padding: "var(--space-2) var(--space-3)" }}>{statusPill(r.status)}</td>
-                  {otjhView ? (
+                  {attendanceView ? (
+                    <>
+                      <td style={cellStyle} className="tabular-nums">{r.attendanceRate == null ? "—" : `${r.attendanceRate}%`}</td>
+                      <td style={cellStyle} className="tabular-nums">{r.attendancePresent ?? "—"}</td>
+                      <td style={cellStyle} className="tabular-nums">{r.attendanceSessions ?? "—"}</td>
+                    </>
+                  ) : otjhView ? (
                     <>
                       <td style={cellStyle} className="tabular-nums">{r.completed ?? "—"}</td>
                       <td style={cellStyle}>{r.target || "—"}</td>
