@@ -23,10 +23,13 @@ Rules match `coach_performance_metrics_by_coach` in the local LMS checkout:
   This selector includes internal profiles hidden by the separate caseload filter.
 - Types: Progress Review / Progress Review (+ Skills Radar); Monthly Coaching
   Meeting / Monthly Coaching / MCM. Other types do not count.
-- PR status: the latest `"Coach".coach_imported_review_instance` linked by
-  `source_review_id = reviews.id` takes precedence when present. Otherwise use
-  the imported `reviews.status`. MCM continues to use `reviews.status`.
-- Effective date: for a completed LMS PR use `completed_at` when present; for
+- PR status: historical Aptem completion (a completed date or status) stays
+  completed unless a linked LMS form has completion history. Otherwise the
+  latest `"Coach".coach_imported_review_instance` linked by
+  `source_review_id = reviews.id` takes precedence. MCM continues to use
+  `reviews.status`.
+- Effective date: for historical Aptem completion use `completed_date` when
+  present; for a completed LMS PR use `completed_at` when present; for
   another LMS status use `planned_scheduled_date`; otherwise use the imported
   `completed_date` when present, then `planned_scheduled_date`.
   Null dates and future dates do not count.
