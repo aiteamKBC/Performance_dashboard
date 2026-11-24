@@ -30,6 +30,11 @@ class ReviewTests(unittest.TestCase):
         self.assertEqual(periods['12w'], dict(required=5, completed=3, overdue=2))
         self.assertEqual(periods['all'], dict(required=6, completed=3, overdue=3))
 
+    def test_lms_awaiting_signature_is_not_completed(self):
+        rows = [('coach', 'Progress Review', 'awaiting-signature', self.today - timedelta(days=2))]
+        counts = aggregate_reviews(rows, self.today)['coach']['PR']['12w']
+        self.assertEqual(counts, dict(required=1, completed=0, overdue=1))
+
     def test_null_dates_and_other_review_types_do_not_count(self):
         self.assertEqual(aggregate_reviews([
             ('coach', 'Personal Support Plan', 'Completed', self.today),
