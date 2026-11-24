@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import type { CoachRecord } from "@/mocks/dashboard";
 import { fetchCoachesLateness } from "@/services/coachesLateness";
@@ -6,6 +6,7 @@ import ActiveLearnersNote from "./components/ActiveLearnersNote";
 import { TopbarLeft, TopbarRight } from "./components/DashboardHeader";
 import ChartsSection from "./components/ChartsSection";
 import CoachCards from "./components/CoachCards";
+import CoachMetricModal, { type CoachMetric } from "./components/CoachMetricModal";
 import AppShell from "@/components/AppShell";
 
 export default function Home() {
@@ -16,6 +17,8 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
+  const [selectedMetric, setSelectedMetric] = useState<{ record: CoachRecord; metric: CoachMetric } | null>(null);
+  const closeMetric = useCallback(() => setSelectedMetric(null), []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -99,8 +102,8 @@ export default function Home() {
   }, [searchQuery, activeCoach, coachRecords]);
 
   // The coach name lets the coach page start loading its learners at once.
-  const openCoach = (r: CoachRecord, metric?: string) =>
-    navigate(`/coach/${r.id}`, { state: { coach: r.coach, caseOwnerId: r.caseOwnerId, metric } });
+  const openCoach = (r: CoachRecord) =>
+    navigate(`/coach/${r.id}`, { state: { coach: r.coach, caseOwnerId: r.caseOwnerId } });
 
   const getLatestSnapshotDate = (rows: CoachRecord[]) => {
     const normalizedDates = rows
@@ -198,12 +201,19 @@ export default function Home() {
           <ActiveLearnersNote />
 
           {/* Coach cards — click to open the coach's learners */}
-          <CoachCards records={filtered} onSelect={(r) => openCoach(r)} onSelectMetric={openCoach} />
+          <CoachCards records={filtered} onSelect={openCoach} onSelectMetric={(record, metric) => setSelectedMetric({ record, metric })} />
 
           {/* Chart row */}
           <ChartsSection records={filtered} />
         </div>
       </AppShell>
+
+      {selectedMetric && <CoachMetricModal
+        key={`${selectedMetric.record.id}-${selectedMetric.metric}`}
+        record={selectedMetric.record}
+        metric={selectedMetric.metric}
+        onClose={closeMetric}
+      />}
 
       <style>{`
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }

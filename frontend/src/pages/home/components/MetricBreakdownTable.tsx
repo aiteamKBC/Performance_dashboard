@@ -438,7 +438,7 @@ function ReviewTrend({ rows, learners, includeAllLearners, metric }: { rows: Met
   );
 }
 
-export default function MetricBreakdownTable({ learners, reviewRows, pendingRows, initialMetric = "ALL", initialStatus = "ALL", initialPeriod = "ALL", pr12Counts, coachName }: { learners: DrillLearnerRow[]; reviewRows: ReviewRow[]; pendingRows: PendingMarkingRow[]; initialMetric?: string; initialStatus?: string; initialPeriod?: string; pr12Counts?: { required: number; completed: number }; coachName?: string }) {
+export default function MetricBreakdownTable({ learners, reviewRows, pendingRows, initialMetric = "ALL", initialStatus = "ALL", initialPeriod = "ALL", lockMetric = false, pr12Counts, coachName }: { learners: DrillLearnerRow[]; reviewRows: ReviewRow[]; pendingRows: PendingMarkingRow[]; initialMetric?: string; initialStatus?: string; initialPeriod?: string; lockMetric?: boolean; pr12Counts?: { required: number; completed: number }; coachName?: string }) {
   const today = useMemo(() => {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
@@ -758,7 +758,7 @@ export default function MetricBreakdownTable({ learners, reviewRows, pendingRows
             </div>
           </label>
 
-          <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
+          {(reviewMode || metric === "PENDING" || metric === "ENGAGED") && <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
             Day
             <input
               type="date"
@@ -768,9 +768,9 @@ export default function MetricBreakdownTable({ learners, reviewRows, pendingRows
               title="Filter by meeting or review date"
               style={{ ...selectStyle, minWidth: 140, cursor: "pointer" }}
             />
-          </label>
+          </label>}
 
-          <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
+          {(reviewMode || metric === "PENDING" || metric === "ENGAGED") && <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
             Month
             <input
               type="month"
@@ -780,14 +780,14 @@ export default function MetricBreakdownTable({ learners, reviewRows, pendingRows
               title="Filter by meeting or review month"
               style={{ ...selectStyle, minWidth: 140, cursor: "pointer" }}
             />
-          </label>
+          </label>}
 
-          <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
+          {!lockMetric && <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
             Metric
             <select value={metric} onChange={(e) => changeMetric(e.target.value)} style={selectStyle}>
               {METRICS.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
             </select>
-          </label>
+          </label>}
 
           <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: "var(--text-xs)", color: "var(--color-text-muted)" }}>
             Programme

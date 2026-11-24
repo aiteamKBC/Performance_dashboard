@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { conflictsLabel, type CoachRecord } from "@/mocks/dashboard";
 import CoachConflictsModal from "./CoachConflictsModal";
+import type { CoachMetric } from "./CoachMetricModal";
 
 interface CoachCardsProps {
   records: CoachRecord[];
   onSelect: (record: CoachRecord) => void;
-  onSelectMetric: (record: CoachRecord, metric: string) => void;
+  onSelectMetric: (record: CoachRecord, metric: CoachMetric) => void;
   /** Section divider label (default "Coaches"). */
   title?: string;
 }
