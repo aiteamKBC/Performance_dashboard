@@ -1,7 +1,7 @@
 """Canonical LMS review counts shared by cards and charts (one count per review).
 
-The imported review supplies the review population. Where an LMS instance exists,
-its latest status overrides the imported PR status for dashboard calculations.
+The imported review supplies the review population. Historical Aptem completion
+survives an LMS booking until the learner has a completed LMS form to revise.
 """
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -51,10 +51,18 @@ def read_review_metrics(cursor, caseload, as_of=None):
     # including internal accounts hidden by the separate caseload display.
     cursor.execute('''SELECT lower(trim(l.coach_email)), r.review_type,
         CASE WHEN lower(trim(r.review_type)) IN ('progress review', 'progress review (+ skills radar)')
-             THEN coalesce(nullif(trim(i.status), ''), r.status)
+             THEN CASE WHEN (r.completed_date IS NOT NULL OR lower(trim(r.status)) IN
+                                  ('completed', 'complete', 'finished'))
+                             AND NOT coalesce(i.has_lms_completion_history, false)
+                       THEN 'completed'
+                       ELSE coalesce(nullif(trim(i.status), ''), r.status) END
              ELSE r.status END,
         CASE WHEN lower(trim(r.review_type)) IN ('progress review', 'progress review (+ skills radar)')
-             THEN CASE WHEN lower(trim(i.status)) IN ('completed', 'complete', 'finished')
+             THEN CASE WHEN (r.completed_date IS NOT NULL OR lower(trim(r.status)) IN
+                                  ('completed', 'complete', 'finished'))
+                             AND NOT coalesce(i.has_lms_completion_history, false)
+                       THEN coalesce(r.completed_date, r.planned_scheduled_date)
+                       WHEN lower(trim(i.status)) IN ('completed', 'complete', 'finished')
                        THEN coalesce(i.completed_at, r.completed_date, r.planned_scheduled_date)
                        WHEN nullif(trim(i.status), '') IS NULL
                        THEN coalesce(r.completed_date, r.planned_scheduled_date)
@@ -63,10 +71,26 @@ def read_review_metrics(cursor, caseload, as_of=None):
         FROM "Learner".learners l
         JOIN "Learner".reviews r ON r.learner_id = l.id
         LEFT JOIN LATERAL (
-            SELECT status, completed_at
-            FROM "Coach".coach_imported_review_instance
-            WHERE source_review_id = r.id
-            ORDER BY updated_at DESC NULLS LAST, id DESC
+            SELECT instance.status, instance.completed_at,
+                   CASE WHEN jsonb_typeof(instance.template_snapshot->'sections') = 'array'
+                        THEN CASE WHEN jsonb_array_length(instance.template_snapshot->'sections') > 0
+                                  AND instance.source_review_id IS NOT NULL
+                                  THEN (instance.status = 'completed' AND instance.completed_at IS NOT NULL)
+                                       OR (instance.status IN ('in-progress', 'awaiting-signature')
+                                           AND EXISTS (
+                                               SELECT 1 FROM "Coach".coach_migrated_review_revision revision
+                                               WHERE revision.overlay_id = instance.id
+                                                 AND revision.snapshot->>'status' = 'completed'
+                                                 AND revision.snapshot->>'completed_at' IS NOT NULL
+                                                 AND coalesce(revision.pdf_sha256, '') <> ''
+                                                 AND revision.pdf_bytes IS NOT NULL
+                                                 AND revision.snapshot->>'source_review_id' = r.id::text
+                                                 AND revision.snapshot->>'learner_id' = l.id::text))
+                                  ELSE false END
+                        ELSE false END AS has_lms_completion_history
+            FROM "Coach".coach_imported_review_instance instance
+            WHERE instance.source_review_id = r.id
+            ORDER BY instance.updated_at DESC NULLS LAST, instance.id DESC
             LIMIT 1
         ) i ON TRUE
         WHERE lower(trim(l.coach_email)) = ANY(%s)
